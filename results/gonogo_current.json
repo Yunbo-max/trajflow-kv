@@ -82,6 +82,17 @@
     "raw_logprob_heldout_auc": 0.75,
     "decision": "No-go for critic-guided KV backprop on the current sample. Preserve the implementation, collect substantially more independent trajectories, and do not claim critic improvement."
   },
+  "flow_sampler_gate": {
+    "model": "Task/screenshot-conditioned rectified flow over four-step structured action chunks",
+    "train_success_trajectories": 11,
+    "heldout_success_trajectories": 2,
+    "samples_per_task": 128,
+    "mean_endpoint_mse": 0.1579961777,
+    "gaussian_mean_mse": 1.1474364996,
+    "mean_bc_mse": {"wifi": 0.0580632314, "bluetooth": 0.0995547920},
+    "projected_best_of_128_mse": {"wifi": 0.0024686565, "bluetooth": 0.0924078152},
+    "decision": "Candidate-coverage go, average-policy no-go. Flow reaches strong best-of-N endpoints after structured projection, but mean samples trail behavior cloning and the current critic cannot reliably select them."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",

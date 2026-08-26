@@ -11,6 +11,9 @@ from trajflow_kv.forks import build_coordinate_fork_pairs, build_fork_pairs
 from trajflow_kv.qwen_policy import action_signature, exclude_repeated_candidates
 from trajflow_kv.state_router import routed_action_type, router_features
 from trajflow_kv.critic import TrajectoryCritic, critic_features
+from trajflow_kv.action_flow import (
+    ActionRectifiedFlow, STEP_WIDTH, encode_action_chunk, project_action_chunks,
+)
 
 
 class Tiny(nn.Module):
@@ -117,3 +120,19 @@ def test_critic_features_keep_logprob_differentiable():
     critic = TrajectoryCritic(len(features))
     critic(features).backward()
     assert logprob.grad is not None
+
+
+def test_action_flow_chunk_shape_and_gradient():
+    trajectory = {"steps": [
+        {"action": '{"action_type":"swipe","direction":"down"}'},
+        {"action": '{"action_type":"click","x":500,"y":200}'},
+    ]}
+    target = encode_action_chunk(trajectory, horizon=3)
+    assert target.shape == (3 * STEP_WIDTH,)
+    model = ActionRectifiedFlow(len(target), 5, hidden=16)
+    state = torch.randn(2, len(target))
+    output = model(state, torch.rand(2), torch.randn(2, 5))
+    output.square().mean().backward()
+    assert any(parameter.grad is not None for parameter in model.parameters())
+    projected = project_action_chunks(output.detach(), horizon=3)
+    assert projected.shape == output.shape

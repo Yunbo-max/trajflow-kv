@@ -59,6 +59,15 @@ log-probability ranking (`0.75`). The critic code is retained for
 reproduction, but critic-guided KV backprop is deliberately not reported as
 an improvement until substantially more independent trajectories exist.
 
+A task/screenshot-conditioned rectified-flow sampler over four-step action
+chunks is implemented as a separate exploration module. On two independent
+held-out successful trajectories, its mean endpoint MSE is `0.1580` versus
+Gaussian noise `1.1474`. After projection to the structured action manifold,
+best-of-128 MSE is `0.00247` for Wi-Fi and `0.0924` for Bluetooth. However,
+mean behavior-cloning baselines are better than average flow samples, and the
+critic gate above cannot yet select the best endpoints reliably. The honest
+status is therefore candidate-coverage go, average-policy/critic-chain no-go.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash
