@@ -1,7 +1,11 @@
 import torch
 from torch import nn
 
-from trajflow_kv.objective import normalized_advantages, trajectory_policy_loss
+from trajflow_kv.objective import (
+    normalized_advantages,
+    shuffle_within_tasks,
+    trajectory_policy_loss,
+)
 from trajflow_kv.projector import attach_kv_projectors
 
 
@@ -23,9 +27,27 @@ def test_hooks_change_output_and_receive_gradients():
     assert bundle.modules[0].up.weight.grad is not None
 
 
+def test_last_n_layers_limits_hook_count():
+    model = nn.Sequential(Tiny(), Tiny(), Tiny())
+    bundle = attach_kv_projectors(
+        model, rank=2, alpha=1.0, target="both", last_n_layers=1
+    )
+    assert len(bundle.modules) == 2
+
+
 def test_return_objective():
     returns = torch.tensor([1., 0., 0., 1.])
     adv = normalized_advantages(returns, ["a", "a", "b", "b"])
     assert torch.allclose(adv.mean(), torch.tensor(0.))
     loss = trajectory_policy_loss(torch.tensor([-1., -2., -3., -1.]), adv)
     assert torch.isfinite(loss)
+
+
+def test_shuffle_preserves_each_task_return_histogram():
+    returns = torch.tensor([0.0, 1.0, 1.0, 0.0, 0.0, 1.0])
+    task_ids = ["a", "a", "a", "b", "b", "b"]
+    shuffled = shuffle_within_tasks(
+        returns, task_ids, generator=torch.Generator().manual_seed(4)
+    )
+    assert sorted(shuffled[:3].tolist()) == sorted(returns[:3].tolist())
+    assert sorted(shuffled[3:].tolist()) == sorted(returns[3:].tolist())

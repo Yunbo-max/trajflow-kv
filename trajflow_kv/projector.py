@@ -56,7 +56,11 @@ class HookedProjectors:
 
 
 def attach_kv_projectors(
-    model: nn.Module, rank: int, alpha: float, target: str = "both"
+    model: nn.Module,
+    rank: int,
+    alpha: float,
+    target: str = "both",
+    last_n_layers: int | None = None,
 ) -> HookedProjectors:
     """Attach projectors to real decoder K/V projection outputs.
 
@@ -70,6 +74,12 @@ def attach_kv_projectors(
                 if name.rsplit(".", 1)[-1] in suffixes and isinstance(module, nn.Linear)]
     if not selected:
         raise RuntimeError("No decoder k_proj/v_proj Linear modules found")
+    if last_n_layers is not None:
+        if last_n_layers <= 0:
+            raise ValueError("last_n_layers must be positive")
+        # Keep K and V from the requested number of final transformer layers.
+        keep = last_n_layers * len(suffixes)
+        selected = selected[-keep:]
 
     projectors = nn.ModuleList()
     handles, names = [], []
@@ -88,4 +98,3 @@ def attach_kv_projectors(
 
 def trainable_parameters(bundle: HookedProjectors) -> Iterable[nn.Parameter]:
     return bundle.modules.parameters()
-

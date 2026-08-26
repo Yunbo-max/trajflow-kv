@@ -24,6 +24,13 @@ def main():
     parser.add_argument("--max-steps", type=int, default=12)
     parser.add_argument("--model", default="models/Qwen2.5-VL-3B-Instruct")
     parser.add_argument("--checkpoint", default="outputs/qwen-aitw/kv_projectors.pt")
+    parser.add_argument("--no-checkpoint", action="store_true")
+    parser.add_argument("--rank", type=int, default=8)
+    parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument("--target", choices=("k", "v", "both"), default="both")
+    parser.add_argument("--last-n-layers", type=int)
+    parser.add_argument("--max-pixels", type=int, default=401408)
+    parser.add_argument("--candidate-mode", choices=("system",))
     parser.add_argument("--output", default="data/androidworld/rollouts.jsonl")
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--seed", type=int, default=7)
@@ -42,7 +49,18 @@ def main():
         )
     instruction = client.goal(args.task, args.task_index)
     task_id = stable_task_id(args.task, instruction, {"task_idx": args.task_index})
-    policy = QwenKVPolicy(args.model, args.checkpoint, temperature=args.temperature)
+    checkpoint = None if args.no_checkpoint else args.checkpoint
+    policy = QwenKVPolicy(
+        args.model,
+        checkpoint,
+        rank=args.rank,
+        alpha=args.alpha,
+        target=args.target,
+        last_n_layers=args.last_n_layers,
+        max_pixels=args.max_pixels,
+        temperature=args.temperature,
+        candidate_mode=args.candidate_mode,
+    )
     results = []
     for rollout_index in range(args.rollouts):
         initialized = False
@@ -62,7 +80,7 @@ def main():
                     "rollout_index": rollout_index,
                     "seed": args.seed,
                     "temperature": args.temperature,
-                    "checkpoint": args.checkpoint,
+                    "checkpoint": checkpoint,
                 },
             )
             append_jsonl(args.output, [result])

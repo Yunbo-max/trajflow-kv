@@ -9,6 +9,32 @@ with a trajectory-level return-weighted objective plus transport-energy and
 orthogonality penalties. It includes a deterministic toy policy for CI and a
 Qwen/AITW path for real experiments.
 
+## Current go/no-go result
+
+The latest controlled run is an **offline signal / online no-go**, not an
+end-to-end success claim. With Qwen2.5-VL-3B, V-only projectors on the last
+eight layers (rank 8, alpha 8), 41 training trajectories and 20 epochs, the
+held-out success-minus-failure log-probability margin improved from `0.1965`
+to `0.2598`. Shuffled-return training reached `0.1955`, and successful-action
+CE reached `0.1874`. However, learned free-form rollouts still achieved no
+success on the tested Wi-Fi/Bluetooth system tasks. The exact snapshot is in
+[`results/gonogo_current.json`](results/gonogo_current.json).
+
+This supports the return-conditioned trajectory-separation mechanism, but it
+does not yet support scaling to flow/critic experiments. The next gate is a
+paired online gain with legal structured actions.
+
+The principal 20-epoch run is reproducible with:
+
+```bash
+.venv/bin/python -m trajflow_kv.train \
+  --config configs/qwen_androidworld.yaml \
+  --data-path data/androidworld/multitask_return_train_v2.jsonl \
+  --output-dir outputs/gonogo/multitask_v2_warm_return_v_r8_l8_a8_e20 \
+  --projector-checkpoint outputs/gonogo/initial_v_l8/kv_projectors.pt \
+  --target v --last-n-layers 8 --rank 8 --alpha 8 --epochs 20
+```
+
 ## What is and is not implemented
 
 - Implemented: online KV hooks (no cached activation dataset), K/V/both

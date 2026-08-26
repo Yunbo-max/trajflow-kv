@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from trajflow_kv.androidworld_http import AndroidWorldHTTPClient
@@ -38,6 +39,12 @@ def main() -> None:
         action="store_true",
         help="Skip the server's expensive screenshot stabilization delay.",
     )
+    parser.add_argument(
+        "--post-action-delay",
+        type=float,
+        default=0.0,
+        help="Pause after execution without adding artificial wait actions to the trajectory.",
+    )
     args = parser.parse_args()
 
     actions = json.loads(args.actions_json)
@@ -61,7 +68,10 @@ def main() -> None:
                 wait_to_stabilize=not args.fast_screenshots
             ),
             screen_size=lambda: client.screen_size,
-            execute=client.execute,
+            execute=lambda action: (
+                client.execute(action),
+                time.sleep(args.post_action_delay),
+            ),
             evaluate=lambda: client.score(args.task, args.task_index),
             rollout_metadata={"policy": "scripted", "label": args.label},
         )

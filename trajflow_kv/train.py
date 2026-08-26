@@ -10,7 +10,7 @@ import yaml
 from torch import nn
 
 from .data import load_jsonl
-from .objective import normalized_advantages, trajectory_policy_loss
+from .objective import normalized_advantages, shuffle_within_tasks, trajectory_policy_loss
 from .projector import attach_kv_projectors
 
 
@@ -39,7 +39,13 @@ def train_toy(cfg):
     model = ToyKVPolicy().to(device)
     for parameter in model.parameters():
         parameter.requires_grad_(False)
-    bundle = attach_kv_projectors(model, cfg["rank"], cfg["alpha"], cfg["target"])
+    bundle = attach_kv_projectors(
+        model,
+        cfg["rank"],
+        cfg["alpha"],
+        cfg["target"],
+        cfg.get("last_n_layers"),
+    )
     optimizer = torch.optim.AdamW(bundle.modules.parameters(), lr=cfg["lr"])
     history = []
     for epoch in range(cfg["epochs"]):
@@ -68,8 +74,17 @@ def train_qwen(cfg):
     )
     for parameter in model.parameters():
         parameter.requires_grad_(False)
+    # Training never reuses generation caches. Keeping them would retain a
+    # full extra KV copy and can exhaust a 16 GiB card before backward.
+    model.config.use_cache = False
     model.gradient_checkpointing_enable()
-    bundle = attach_kv_projectors(model, cfg["rank"], cfg["alpha"], cfg["target"])
+    bundle = attach_kv_projectors(
+        model,
+        cfg["rank"],
+        cfg["alpha"],
+        cfg["target"],
+        cfg.get("last_n_layers"),
+    )
     projector_checkpoint = cfg.get("projector_checkpoint")
     if projector_checkpoint:
         bundle.modules.load_state_dict(
@@ -91,15 +106,19 @@ def train_qwen(cfg):
     if device.startswith("cuda"):
         torch.cuda.reset_peak_memory_stats()
     for epoch in range(cfg["epochs"]):
-        returns = torch.tensor([float(t["return"]) for t in trajectories], device=device)
+        observed_returns = torch.tensor(
+            [float(t["return"]) for t in trajectories], device=device
+        )
+        returns = observed_returns.clone()
+        task_ids = [t["task_id"] for t in trajectories]
         return_mode = cfg.get("return_mode", "observed")
         if return_mode == "shuffle":
-            returns = returns[torch.randperm(len(returns), device=device)]
+            returns = shuffle_within_tasks(returns, task_ids)
         elif return_mode == "zero":
             returns = torch.zeros_like(returns)
         elif return_mode != "observed":
             raise ValueError(f"unsupported return_mode: {return_mode}")
-        advantages = normalized_advantages(returns, [t["task_id"] for t in trajectories])
+        advantages = normalized_advantages(returns, task_ids)
         if cfg.get("lambda_action", 0.0) == 0 and torch.count_nonzero(advantages) == 0:
             raise ValueError(
                 "pure return training has zero advantages; collect mixed returns "
@@ -135,13 +154,16 @@ def train_qwen(cfg):
                 # final-N masking is wrong because chat templates add EOS tokens.
                 prompt_tokens = prompt_batch["input_ids"].shape[1]
                 labels[:, :prompt_tokens] = -100
-                output = model(**batch, labels=labels)
+                output = model(**batch, labels=labels, use_cache=False)
                 valid = (labels != -100).sum().clamp_min(1)
                 trajectory_logprob = trajectory_logprob - output.loss * valid
             # AITW demos have no failure return; action NLL keeps that offline
             # warm-start useful. Set lambda_action=0 for pure online return RL.
             loss = -advantages[index].detach() * trajectory_logprob
-            loss = loss - cfg.get("lambda_action", 0.0) * trajectory_logprob
+            action_weight = cfg.get("lambda_action", 0.0)
+            if cfg.get("positive_action_only", False) and observed_returns[index] <= 0:
+                action_weight = 0.0
+            loss = loss - action_weight * trajectory_logprob
             loss = loss + cfg["lambda_energy"] * bundle.energy() + cfg["lambda_orth"] * bundle.orthogonality_loss()
             (loss / cfg["gradient_accumulation_steps"]).backward()
             if (index + 1) % cfg["gradient_accumulation_steps"] == 0 or index + 1 == len(trajectories):
@@ -161,11 +183,18 @@ def main():
     parser.add_argument("--data-path")
     parser.add_argument("--output-dir")
     parser.add_argument("--projector-checkpoint")
+    parser.add_argument("--no-projector-checkpoint", action="store_true")
+    parser.add_argument("--target", choices=("k", "v", "both"))
+    parser.add_argument("--rank", type=int)
+    parser.add_argument("--alpha", type=float)
+    parser.add_argument("--last-n-layers", type=int)
     parser.add_argument("--return-mode", choices=("observed", "shuffle", "zero"))
     parser.add_argument("--lambda-action", type=float)
+    parser.add_argument("--positive-action-only", action="store_true")
     parser.add_argument("--lambda-energy", type=float)
     parser.add_argument("--lambda-orth", type=float)
     parser.add_argument("--epochs", type=int)
+    parser.add_argument("--max-pixels", type=int)
     args = parser.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text())
     if args.max_trajectories is not None:
@@ -176,7 +205,14 @@ def main():
         cfg["output_dir"] = args.output_dir
     if args.projector_checkpoint is not None:
         cfg["projector_checkpoint"] = args.projector_checkpoint
-    for key in ("return_mode", "lambda_action", "lambda_energy", "lambda_orth", "epochs"):
+    if args.no_projector_checkpoint:
+        cfg["projector_checkpoint"] = None
+    if args.positive_action_only:
+        cfg["positive_action_only"] = True
+    for key in (
+        "return_mode", "lambda_action", "lambda_energy", "lambda_orth",
+        "epochs", "max_pixels", "target", "rank", "alpha", "last_n_layers",
+    ):
         value = getattr(args, key)
         if value is not None:
             cfg[key] = value

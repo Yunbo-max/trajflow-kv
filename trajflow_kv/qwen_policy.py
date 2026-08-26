@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
+from .actions import canonical_action
 from .projector import attach_kv_projectors
 
 
@@ -33,23 +34,88 @@ class QwenKVPolicy:
     def __init__(self, model_path: str, checkpoint: str | None = None, *, rank: int = 8,
                  alpha: float = 0.1, target: str = "both", device: str = "cuda",
                  max_pixels: int = 401408, temperature: float = 0.7,
-                 max_new_tokens: int = 128):
+                 max_new_tokens: int = 128,
+                 last_n_layers: int | None = None,
+                 candidate_mode: str | None = None):
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
         self.processor = AutoProcessor.from_pretrained(model_path, max_pixels=max_pixels)
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_path, dtype=torch.bfloat16, device_map=device
         ).eval()
-        self.bundle = attach_kv_projectors(self.model, rank, alpha, target)
+        self.bundle = attach_kv_projectors(
+            self.model, rank, alpha, target, last_n_layers
+        )
         if checkpoint:
             state = torch.load(Path(checkpoint), map_location=device, weights_only=True)
             self.bundle.modules.load_state_dict(state)
         self.device = device
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
+        self.candidate_mode = candidate_mode
+
+    def _system_candidates(self, instruction: str) -> list[str]:
+        lower = instruction.lower()
+        common = [
+            canonical_action({"action_type": "swipe", "direction": "down"}),
+            canonical_action({"action_type": "navigate_back"}),
+            canonical_action({"action_type": "wait"}),
+        ]
+        if "wifi" in lower or "wi-fi" in lower:
+            return common + [
+                canonical_action({"action_type": "click", "x": 260, "y": 200}),
+                canonical_action({"action_type": "click", "x": 260, "y": 340}),
+                canonical_action({"action_type": "click", "x": 870, "y": 920}),
+            ]
+        if "bluetooth" in lower:
+            return common + [
+                canonical_action({"action_type": "click", "x": 780, "y": 200}),
+                canonical_action({"action_type": "click", "x": 780, "y": 340}),
+            ]
+        return common
+
+    @torch.inference_mode()
+    def _rank_candidates(
+        self, instruction: str, image: Image.Image, history: list[str],
+        screen_size: tuple[int, int], candidates: list[str]
+    ) -> str:
+        prompt = build_action_prompt(instruction, history, screen_size)
+        scores = []
+        for candidate in candidates:
+            user = {"role": "user", "content": [
+                {"type": "image", "image": image}, {"type": "text", "text": prompt}
+            ]}
+            prompt_batch = self.processor.apply_chat_template(
+                [user], tokenize=True, add_generation_prompt=True,
+                return_dict=True, return_tensors="pt"
+            )
+            batch = self.processor.apply_chat_template(
+                [user, {"role": "assistant", "content": [
+                    {"type": "text", "text": candidate}
+                ]}],
+                tokenize=True, return_dict=True, return_tensors="pt"
+            ).to(self.device)
+            labels = batch["input_ids"].clone()
+            labels[:, :prompt_batch["input_ids"].shape[1]] = -100
+            output = self.model(**batch, labels=labels, use_cache=False)
+            # Length-normalize so short actions (notably ``wait``/``swipe``)
+            # do not win solely because they contain fewer JSON tokens.
+            scores.append(-float(output.loss))
+        score_tensor = torch.tensor(scores)
+        if self.temperature > 0:
+            probabilities = torch.softmax(score_tensor / self.temperature, dim=0)
+            index = int(torch.multinomial(probabilities, 1))
+        else:
+            index = int(score_tensor.argmax())
+        return candidates[index]
 
     @torch.inference_mode()
     def act(self, instruction: str, image: Image.Image, history: list[str],
             screen_size: tuple[int, int]) -> str:
+        if self.candidate_mode == "system":
+            return self._rank_candidates(
+                instruction, image, history, screen_size,
+                self._system_candidates(instruction),
+            )
         prompt = build_action_prompt(instruction, history, screen_size)
         messages = [{"role": "user", "content": [
             {"type": "image", "image": image}, {"type": "text", "text": prompt}

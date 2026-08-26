@@ -23,6 +23,7 @@ def main() -> None:
     parser.add_argument("--rank", type=int, default=8)
     parser.add_argument("--alpha", type=float, default=0.1)
     parser.add_argument("--target", choices=("k", "v", "both"), default="both")
+    parser.add_argument("--last-n-layers", type=int)
     parser.add_argument("--max-pixels", type=int, default=200704)
     args = parser.parse_args()
 
@@ -32,7 +33,9 @@ def main() -> None:
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         args.model, dtype=torch.bfloat16, device_map="cuda"
     ).eval()
-    bundle = attach_kv_projectors(model, args.rank, args.alpha, args.target)
+    bundle = attach_kv_projectors(
+        model, args.rank, args.alpha, args.target, args.last_n_layers
+    )
     bundle.modules.load_state_dict(
         torch.load(args.checkpoint, map_location="cuda", weights_only=True)
     )

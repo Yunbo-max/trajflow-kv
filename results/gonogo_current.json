@@ -1,28 +1,46 @@
 {
-  "status": "provisional_no_go",
-  "reason": "The candidate has a small in-domain gain, but only one discordant online pair and zero success on both unseen system tasks.",
-  "offline_return_margin": {
-    "splits": [17, 23, 31],
-    "initial": [1.5423460454, 0.9596502, 0.9983119],
-    "return_no_energy": [1.5552779238, 0.9507319, 1.0064783],
-    "random_no_energy": [1.5292873, 0.9506620, 1.0181458],
-    "mean_delta_return_vs_initial": 0.0040607,
-    "mean_delta_random_vs_initial": -0.0007376
+  "status": "offline_signal_online_no_go",
+  "conclusion": "Return-conditioned KV learning produces a repeatable held-out trajectory-separation signal beyond shuffled returns and successful-action CE, but has not improved end-to-end free-form AndroidWorld success on the system tasks.",
+  "architecture": {
+    "backbone": "Qwen2.5-VL-3B-Instruct",
+    "target": "V only",
+    "last_n_layers": 8,
+    "rank": 8,
+    "alpha": 8.0,
+    "epochs": 20,
+    "peak_gpu_gib": 11.3658
   },
-  "online_paired": {
-    "pairs": 16,
-    "baseline_successes": 6,
-    "candidate_successes": 7,
-    "baseline_success_rate": 0.375,
-    "candidate_success_rate": 0.4375,
-    "improved_pairs": 1,
-    "regressed_pairs": 0,
-    "unchanged_pairs": 15,
-    "tasks": {
-      "OpenAppTaskEval": {"pairs": 10, "baseline": 6, "candidate": 7},
-      "SystemBluetoothTurnOn": {"pairs": 3, "baseline": 0, "candidate": 0},
-      "SystemWifiTurnOff": {"pairs": 3, "baseline": 0, "candidate": 0}
+  "data": {
+    "training_trajectories": 41,
+    "training_tasks": 3,
+    "training_successes": 20,
+    "heldout_trajectories": 6,
+    "heldout_tasks": 2,
+    "adaptive_scripted_success": {
+      "SystemBluetoothTurnOn": "4/4",
+      "SystemWifiTurnOff": "5/5 after detector correction"
     }
   },
-  "next_gate": "Collect real successful system-task trajectories, retrain a multi-task projector, and repeat paired multi-seed evaluation before adding flow or critic components."
+  "heldout_return_margin": {
+    "initial": 0.1965097303,
+    "return_kv_epoch_20": 0.2598086340,
+    "shuffled_return_epoch_20": 0.1955088403,
+    "successful_action_ce_epoch_20": 0.1874009235,
+    "return_delta_vs_initial": 0.0632989037,
+    "return_delta_vs_shuffled": 0.0642997938,
+    "return_delta_vs_action_ce": 0.0724077105
+  },
+  "heldout_action_ranking": {
+    "steps": 6,
+    "initial": {"top1": 0.5, "mrr": 0.6071428571, "margin": -0.2568987415},
+    "return_kv_epoch_20": {"top1": 0.5, "mrr": 0.625, "margin": -0.2136565124},
+    "shuffled_return_epoch_20": {"top1": 0.5, "mrr": 0.6210317460, "margin": -0.2358597300},
+    "successful_action_ce_epoch_20": {"top1": 0.5, "mrr": 0.6210317460, "margin": -0.2009545847}
+  },
+  "online": {
+    "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
+    "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations.",
+    "candidate_ranking": "All tested deterministic Wi-Fi rollouts repeatedly selected swipe-down and failed.",
+    "go_no_go": "Do not claim end-to-end method success or start full flow/critic scaling yet. First solve structured action selection and demonstrate paired online gains."
+  }
 }
