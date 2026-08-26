@@ -57,13 +57,21 @@
     "overfit_control": "Ten click-focused epochs increased return margin to 0.4130 but collapsed Top-1 to 0.1667; rejected by the ranking gate."
   },
   "state_router": {
-    "input": "24x24 RGB screenshot plus normalized history length",
+    "input": "64x64 RGB screenshot, normalized history length, and hashed instruction features",
     "train_examples": 46,
     "train_accuracy": 0.9565217391,
     "heldout_examples": 6,
     "heldout_accuracy": 0.8333333333,
     "heldout_click_accuracy": "3/3",
     "online_status": "Pending rerun after software-emulator rendering/system_server instability; black-screen router probes are excluded."
+  },
+  "low_energy_transport": {
+    "evaluation": "Contemporaneous 10-epoch held-out comparison",
+    "unregularized": {"return_margin": 0.2208706249, "mean_transport_energy": 0.0003004442},
+    "lambda_3000": {"return_margin": 0.2160150197, "mean_transport_energy": 0.0000671636, "top1": 0.5, "mrr": 0.6210317460, "mean_correct_margin": -0.2117515951},
+    "lambda_10000": {"return_margin": 0.2087020434, "mean_transport_energy": 0.0000240002},
+    "lambda_100000": {"return_margin": 0.1855829112, "mean_transport_energy": 0.0000008194},
+    "interpretation": "lambda=3000 reduces measured activation transport energy 4.47x while retaining 97.8% of the unregularized return margin; lambda=100000 is over-regularized."
   },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},

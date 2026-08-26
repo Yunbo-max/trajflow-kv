@@ -43,6 +43,14 @@ those corrupted probes are explicitly excluded. The committed AndroidWorld
 patch now permits a physical-size fallback so action execution does not depend
 on a fragile `dumpsys input` call under TCG.
 
+The energy term was also calibrated rather than left at its numerically
+negligible initial coefficient. In a contemporaneous 10-epoch comparison,
+unregularized Return-KV has held-out margin `0.2209` at mean activation energy
+`3.00e-4`; `lambda_energy=3000` retains margin `0.2160` while reducing energy
+to `6.72e-5` (4.47x lower). `lambda_energy=100000` reaches `8.19e-7` but drops
+margin below the initial checkpoint, demonstrating the expected Pareto
+trade-off and providing a practical low-energy setting.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash

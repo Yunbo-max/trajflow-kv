@@ -164,12 +164,16 @@ def train_qwen(cfg):
             if cfg.get("positive_action_only", False) and observed_returns[index] <= 0:
                 action_weight = 0.0
             loss = loss - action_weight * trajectory_logprob
-            loss = loss + cfg["lambda_energy"] * bundle.energy() + cfg["lambda_orth"] * bundle.orthogonality_loss()
+            energy = bundle.energy()
+            orthogonality = bundle.orthogonality_loss()
+            loss = loss + cfg["lambda_energy"] * energy + cfg["lambda_orth"] * orthogonality
             (loss / cfg["gradient_accumulation_steps"]).backward()
             if (index + 1) % cfg["gradient_accumulation_steps"] == 0 or index + 1 == len(trajectories):
                 optimizer.step(); optimizer.zero_grad(set_to_none=True)
             metric = {"epoch": epoch, "trajectory": index, "loss": float(loss.detach()),
-                      "return": float(returns[index]), "advantage": float(advantages[index])}
+                      "return": float(returns[index]), "advantage": float(advantages[index]),
+                      "energy": float(energy.detach()),
+                      "orthogonality": float(orthogonality.detach())}
             if device.startswith("cuda"):
                 metric["peak_gpu_gib"] = torch.cuda.max_memory_allocated() / 2**30
             history.append(metric)

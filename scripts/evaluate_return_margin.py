@@ -44,6 +44,7 @@ def main() -> None:
     with torch.inference_mode():
         for trajectory_index, trajectory in enumerate(load_jsonl(args.data)):
             logprob_sum, token_count = 0.0, 0
+            transport_energies = []
             for step in trajectory["steps"]:
                 content = []
                 loaded_image = None
@@ -71,6 +72,7 @@ def main() -> None:
                 labels = batch["input_ids"].clone()
                 labels[:, :prompt_batch["input_ids"].shape[1]] = -100
                 output = model(**batch, labels=labels)
+                transport_energies.append(float(bundle.energy()))
                 valid = int((labels != -100).sum())
                 logprob_sum += -float(output.loss) * valid
                 token_count += valid
@@ -80,6 +82,7 @@ def main() -> None:
                 "return": float(trajectory["return"]),
                 "tokens": token_count,
                 "mean_token_logprob": logprob_sum / max(token_count, 1),
+                "mean_transport_energy": sum(transport_energies) / len(transport_energies),
             })
 
     positive = [row["mean_token_logprob"] for row in rows if row["return"] > 0]
@@ -95,6 +98,9 @@ def main() -> None:
         "positive_mean_token_logprob": sum(positive) / len(positive),
         "negative_mean_token_logprob": sum(negative) / len(negative),
         "return_margin": sum(positive) / len(positive) - sum(negative) / len(negative),
+        "mean_transport_energy": sum(
+            row["mean_transport_energy"] for row in rows
+        ) / len(rows),
         "rows": rows,
     }
     output = Path(args.output)
