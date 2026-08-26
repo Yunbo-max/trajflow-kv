@@ -108,6 +108,28 @@ has constant return. This prevents an all-success or all-failure batch from
 silently producing zero centered policy-gradient signal. The AndroidWorld
 config loads the AITW projector checkpoint before applying return updates.
 
+### Running without `/dev/kvm`
+
+The verified software-emulation setup is reproducible with:
+
+```bash
+./scripts/setup_androidworld_software.sh
+./scripts/run_androidworld_software.sh
+```
+
+The setup pins AndroidWorld commit `3e508885`, installs API 33/Pixel 6 and a
+Python 3.11 environment, and applies `patches/androidworld-tcg.patch`. The patch
+makes ADB timeouts configurable, allows screenshot-only operation without the
+accessibility forwarder, and makes first-time app setup optional. The runner
+uses `-accel off`, registers an Android ActivityController so slow TCG boot does
+not repeatedly trip the `system_server` watchdog, skips Setup Wizard, and
+serves the official API on `127.0.0.1:5000`.
+
+On the reference RTX A4000 container, first boot took roughly 25 minutes.
+Native AndroidWorld initialization then returned a 1080x2400 screenshot in
+15.4 seconds. A real `ContactsAddContact` initialize/score/teardown cycle and
+a Qwen + KV checkpoint rollout were both verified.
+
 To exercise the exact return path without an emulator, create a small mixed
 fixture from the downloaded sample:
 

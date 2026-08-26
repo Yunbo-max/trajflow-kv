@@ -33,6 +33,15 @@ def test_aitw_two_point_swipe_converts_to_androidworld_direction():
     assert action == {"action_type": "swipe", "direction": "up"}
 
 
+def test_parser_uses_first_json_and_tolerates_trailing_reasoning():
+    action = parse_action(
+        '{"action_type":"click","x":10,"y":20}\nI clicked the button.\n'
+        '{"action_type":"wait"}',
+        (100, 200),
+    )
+    assert action == {"action_type": "click", "x": 10, "y": 20}
+
+
 def test_mixed_return_rollout_schema(tmp_path):
     executed = []
     policy = SequencePolicy(["not json", '{"action_type":"status","goal_status":"complete"}'])
@@ -47,4 +56,5 @@ def test_mixed_return_rollout_schema(tmp_path):
     assert record["return"] == 1.0 and len(record["steps"]) == 2
     assert record["metadata"]["invalid_actions"] == 1
     assert executed[0] == {"action_type": "wait"}
+    assert record["steps"][0]["model_output"] == "not json"
     assert json.loads(record["steps"][1]["action"])["action_type"] == "status"

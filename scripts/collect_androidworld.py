@@ -13,6 +13,7 @@ from trajflow_kv.rollout import append_jsonl, collect_rollout, stable_task_id
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--server-url", default="http://localhost:5000")
+    parser.add_argument("--http-timeout", type=float, default=300.0)
     parser.add_argument("--task", default="ContactsAddContact")
     parser.add_argument("--task-index", type=int, default=0)
     parser.add_argument("--rollouts", type=int, default=4)
@@ -23,7 +24,7 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.7)
     args = parser.parse_args()
 
-    client = AndroidWorldHTTPClient(args.server_url)
+    client = AndroidWorldHTTPClient(args.server_url, timeout=args.http_timeout)
     if not client.health():
         raise RuntimeError(
             f"AndroidWorld server is not healthy at {args.server_url}. "
@@ -35,9 +36,9 @@ def main():
     results = []
     for rollout_index in range(args.rollouts):
         client.reset(go_home=True)
-        client.initialize_task(args.task, args.task_index)
-        run_id = f"{task_id}-r{rollout_index:03d}"
         try:
+            client.initialize_task(args.task, args.task_index)
+            run_id = f"{task_id}-r{rollout_index:03d}"
             result = collect_rollout(
                 policy=policy, instruction=instruction, task_id=task_id,
                 max_steps=args.max_steps,

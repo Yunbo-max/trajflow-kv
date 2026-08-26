@@ -50,9 +50,9 @@ def collect_rollout(
         image = Image.fromarray(get_pixels()).convert("RGB")
         image_path = (image_dir / f"{task_id}-{step_index:03d}.png").resolve()
         image.save(image_path)
-        raw = policy.act(instruction, image, history.copy(), screen_size())
+        model_output = policy.act(instruction, image, history.copy(), screen_size())
         try:
-            action = parse_action(raw, screen_size())
+            action = parse_action(model_output, screen_size())
         except InvalidAction as error:
             invalid += 1
             action = {"action_type": "wait"}
@@ -62,7 +62,7 @@ def collect_rollout(
             raw = canonical_action(action)
             parse_error = None
         steps.append({"image": str(image_path), "screen_size": list(screen_size()), "history": history.copy(),
-                      "action": raw, "parse_error": parse_error})
+                      "action": raw, "model_output": model_output, "parse_error": parse_error})
         execute(action)
         history.append(raw)
         if action["action_type"] == "status":

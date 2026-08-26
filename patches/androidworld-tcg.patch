@@ -1,0 +1,64 @@
+diff --git a/android_world/env/adb_utils.py b/android_world/env/adb_utils.py
+index 4689b45..6e3fc54 100644
+--- a/android_world/env/adb_utils.py
++++ b/android_world/env/adb_utils.py
+@@ -28,7 +28,7 @@ import immutabledict
+ 
+ T = TypeVar('T')
+ 
+-_DEFAULT_TIMEOUT_SECS = 10
++_DEFAULT_TIMEOUT_SECS = float(os.environ.get('ANDROID_WORLD_ADB_COMMAND_TIMEOUT', '10'))
+ 
+ # pylint: disable=line-too-long
+ # Maps app names to the activity that should be launched to open the app.
+diff --git a/android_world/env/android_world_controller.py b/android_world/env/android_world_controller.py
+index dda5352..0adc871 100644
+--- a/android_world/env/android_world_controller.py
++++ b/android_world/env/android_world_controller.py
+@@ -325,9 +325,21 @@ def get_controller(
+       ),
+       simulator=config_classes.EmulatorConfig(
+           emulator_launcher=emulator_launcher,
+-          adb_controller=config_classes.AdbControllerConfig(adb_path=adb_path),
++          # Software-emulated Android can require several minutes to install
++          # the accessibility forwarder. The upstream 120s default is tuned
++          # for KVM and causes a false timeout in nested containers.
++          adb_controller=config_classes.AdbControllerConfig(
++              adb_path=adb_path, default_timeout=600.0
++          ),
+       ),
+   )
+   android_env_instance = loader.load(config)
+   logging.info('Setting up AndroidWorldController.')
+-  return AndroidWorldController(android_env_instance)
++  # The forwarder performs several synchronous APK/broadcast operations that
++  # are prohibitively slow under TCG software emulation. Screenshot-only VLM
++  # rollouts do not consume the accessibility tree, so allow an explicit local
++  # fallback while retaining the upstream default for normal KVM runs.
++  a11y_method = A11yMethod(
++      os.environ.get('ANDROID_WORLD_A11Y_METHOD', A11yMethod.A11Y_FORWARDER_APP.value)
++  )
++  return AndroidWorldController(android_env_instance, a11y_method=a11y_method)
+diff --git a/server/android_server.py b/server/android_server.py
+index 583b40e..bf8f313 100644
+--- a/server/android_server.py
++++ b/server/android_server.py
+@@ -19,6 +19,7 @@ and manage task execution on AndroidWorld tasks.
+ """
+ 
+ import contextlib
++import os
+ import typing
+ from typing import Any
+ 
+@@ -44,8 +45,8 @@ async def lifespan(fast_api_app: fastapi.FastAPI):
+   """Manages the lifecycle of the Android environment and task suite."""
+   fast_api_app.state.app_android_env = env_launcher.load_and_setup_env(
+       console_port=5554,
+-      emulator_setup=True,
+-      freeze_datetime=True,
++      emulator_setup=os.environ.get("ANDROID_WORLD_SETUP_APPS", "1") == "1",
++      freeze_datetime=os.environ.get("ANDROID_WORLD_FREEZE_DATETIME", "1") == "1",
+       adb_path="/opt/android/platform-tools/adb",
+   )
+   task_registry = aw_registry_module.TaskRegistry()

@@ -28,11 +28,14 @@ def _extract_json(text: str) -> dict[str, Any]:
     try:
         value = json.loads(candidate)
     except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start < 0 or end <= start:
+        start = text.find("{")
+        if start < 0:
             raise InvalidAction("model output contains no JSON object")
         try:
-            value = json.loads(text[start:end + 1])
+            # Decode the first complete object and tolerate trailing reasoning
+            # or a second proposal. The executed canonical action is recorded
+            # separately from the untouched model output.
+            value, _ = json.JSONDecoder().raw_decode(text[start:])
         except json.JSONDecodeError as error:
             raise InvalidAction(f"invalid action JSON: {error.msg}") from error
     if not isinstance(value, dict):
