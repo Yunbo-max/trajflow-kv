@@ -96,11 +96,20 @@ def main() -> None:
                 correct_index = proposals.index(correct)
                 order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
                 action_rank = order.index(correct_index) + 1
+                correct_type = json.loads(correct)["action_type"]
+                same_type = [
+                    index for index, proposal in enumerate(proposals)
+                    if json.loads(proposal)["action_type"] == correct_type
+                ]
+                type_order = sorted(same_type, key=lambda i: scores[i], reverse=True)
+                type_rank = type_order.index(correct_index) + 1
                 rows.append({
                     "trajectory": trajectory_index,
                     "step": step_index,
                     "correct": correct,
                     "rank": action_rank,
+                    "type_rank": type_rank,
+                    "same_type_candidates": len(same_type),
                     "candidates": len(proposals),
                     "correct_score": scores[correct_index],
                     "best_incorrect_score": max(
@@ -112,6 +121,8 @@ def main() -> None:
         "steps": len(rows),
         "top1_accuracy": sum(row["rank"] == 1 for row in rows) / len(rows),
         "mrr": sum(1.0 / row["rank"] for row in rows) / len(rows),
+        "type_conditioned_top1": sum(row["type_rank"] == 1 for row in rows) / len(rows),
+        "type_conditioned_mrr": sum(1.0 / row["type_rank"] for row in rows) / len(rows),
         "mean_correct_margin": sum(
             row["correct_score"] - row["best_incorrect_score"] for row in rows
         ) / len(rows),

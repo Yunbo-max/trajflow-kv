@@ -11,8 +11,8 @@ Qwen/AITW path for real experiments.
 
 ## Current go/no-go result
 
-The latest controlled run is an **offline signal / online no-go**, not an
-end-to-end success claim. With Qwen2.5-VL-3B, V-only projectors on the last
+The latest controlled run is a **single-task online go / cross-task pending**,
+not a broad end-to-end success claim. With Qwen2.5-VL-3B, V-only projectors on the last
 eight layers (rank 8, alpha 8), 41 training trajectories and 20 epochs, the
 held-out success-minus-failure log-probability margin improved from `0.1965`
 to `0.2598`. Shuffled-return training reached `0.1955`, and successful-action
@@ -26,9 +26,14 @@ Top-1 stayed at `0.5`; its online Wi-Fi rollout emitted legal actions yet
 repeated the same swipe for all eight steps and failed. This narrows the next
 problem to state-conditioned/fork-point action selection rather than syntax.
 
-This supports the return-conditioned trajectory-separation mechanism, but it
-does not yet support scaling to flow/critic experiments. The next gate is a
-paired online gain with legal structured actions.
+State-conditioned fork preferences, click-coordinate hard negatives, and
+hierarchical type/parameter ranking subsequently raise held-out return margin
+to `0.3685`, action MRR to `0.6722`, and type-conditioned Top-1 to `0.8333`.
+On real AndroidWorld Bluetooth, the identical structured policy yields
+baseline `0/4` versus Return/Fork/Coordinate-KV `4/4` across one deterministic
+and three temperature-0.2 seeds. Wi-Fi still fails because the policy acts
+before the quick-settings shade is fully expanded. The next gate is therefore
+learned state routing and cross-task online replication.
 
 The principal 20-epoch run is reproducible with:
 
@@ -46,7 +51,8 @@ The principal 20-epoch run is reproducible with:
 - Implemented: online KV hooks (no cached activation dataset), K/V/both
   injection, REINFORCE-style trajectory loss, per-task baseline, normalized
   advantages, energy and orthogonality regularization, JSONL trajectory
-  format, checkpoints, and smoke tests.
+  format, checkpoints, fork/coordinate preference training, hierarchical
+  candidate ranking, loop guards, and smoke tests.
 - Adapter-ready: AndroidWorld rollouts can be exported into the same JSONL
   schema using `scripts/androidworld_to_jsonl.py`.
 - Deferred deliberately: flow action sampler, learned critic, and student

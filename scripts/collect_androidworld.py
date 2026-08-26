@@ -30,7 +30,9 @@ def main():
     parser.add_argument("--target", choices=("k", "v", "both"), default="both")
     parser.add_argument("--last-n-layers", type=int)
     parser.add_argument("--max-pixels", type=int, default=401408)
-    parser.add_argument("--candidate-mode", choices=("system",))
+    parser.add_argument("--candidate-mode", choices=("system", "system_hierarchical"))
+    parser.add_argument("--max-identical-actions", type=int)
+    parser.add_argument("--max-identical-candidates", type=int)
     parser.add_argument("--output", default="data/androidworld/rollouts.jsonl")
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--seed", type=int, default=7)
@@ -60,6 +62,8 @@ def main():
         max_pixels=args.max_pixels,
         temperature=args.temperature,
         candidate_mode=args.candidate_mode,
+        max_identical_actions=args.max_identical_actions,
+        max_identical_candidates=args.max_identical_candidates,
     )
     results = []
     for rollout_index in range(args.rollouts):

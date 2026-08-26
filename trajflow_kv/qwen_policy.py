@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-from .actions import canonical_action
+from .actions import InvalidAction, canonical_action, parse_action
 from .projector import attach_kv_projectors
 
 
@@ -25,6 +25,30 @@ Valid examples:
 Coordinates may be absolute pixels or normalized floats in [0,1]."""
 
 
+def action_signature(action: dict) -> tuple:
+    """Signature for loop detection; ignore incidental generated coordinates."""
+    action_type = action.get("action_type")
+    if action_type in {"swipe", "scroll"}:
+        return "pan", action.get("direction")
+    return (action_type,)
+
+
+def exclude_repeated_candidates(
+    candidates: list[str], history: list[str], screen_size: tuple[int, int], limit: int
+) -> list[str]:
+    kept = []
+    for candidate in candidates:
+        candidate_action = canonical_action(parse_action(candidate, screen_size))
+        repeated = 0
+        for previous in reversed(history):
+            if canonical_action(parse_action(previous, screen_size)) != candidate_action:
+                break
+            repeated += 1
+        if repeated < limit:
+            kept.append(candidate)
+    return kept or candidates
+
+
 def build_action_prompt(instruction: str, history: list[str], screen_size: tuple[int, int]) -> str:
     return (f"{SYSTEM}\nScreen size: {screen_size[0]}x{screen_size[1]}\n"
             f"Task: {instruction}\nHistory: {json.dumps(history)}")
@@ -36,7 +60,9 @@ class QwenKVPolicy:
                  max_pixels: int = 401408, temperature: float = 0.7,
                  max_new_tokens: int = 128,
                  last_n_layers: int | None = None,
-                 candidate_mode: str | None = None):
+                 candidate_mode: str | None = None,
+                 max_identical_actions: int | None = None,
+                 max_identical_candidates: int | None = None):
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
         self.processor = AutoProcessor.from_pretrained(model_path, max_pixels=max_pixels)
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -52,6 +78,12 @@ class QwenKVPolicy:
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
         self.candidate_mode = candidate_mode
+        self.max_identical_actions = max_identical_actions
+        self.max_identical_candidates = (
+            max_identical_candidates
+            if max_identical_candidates is not None
+            else max_identical_actions
+        )
 
     def _system_candidates(self, instruction: str) -> list[str]:
         lower = instruction.lower()
@@ -109,13 +141,8 @@ class QwenKVPolicy:
         return candidates[index]
 
     @torch.inference_mode()
-    def act(self, instruction: str, image: Image.Image, history: list[str],
-            screen_size: tuple[int, int]) -> str:
-        if self.candidate_mode == "system":
-            return self._rank_candidates(
-                instruction, image, history, screen_size,
-                self._system_candidates(instruction),
-            )
+    def _generate(self, instruction: str, image: Image.Image, history: list[str],
+                  screen_size: tuple[int, int]) -> str:
         prompt = build_action_prompt(instruction, history, screen_size)
         messages = [{"role": "user", "content": [
             {"type": "image", "image": image}, {"type": "text", "text": prompt}
@@ -129,3 +156,53 @@ class QwenKVPolicy:
         generated = self.model.generate(**batch, max_new_tokens=self.max_new_tokens, **sampling)
         suffix = generated[0, batch["input_ids"].shape[1]:]
         return self.processor.decode(suffix, skip_special_tokens=True).strip()
+
+    @torch.inference_mode()
+    def act(self, instruction: str, image: Image.Image, history: list[str],
+            screen_size: tuple[int, int]) -> str:
+        candidates = self._system_candidates(instruction)
+        if self.candidate_mode == "system":
+            return self._rank_candidates(
+                instruction, image, history, screen_size, candidates,
+            )
+        if self.candidate_mode == "system_hierarchical":
+            proposal = self._generate(instruction, image, history, screen_size)
+            if self.max_identical_candidates and history:
+                try:
+                    candidates = exclude_repeated_candidates(
+                        candidates, history, screen_size, self.max_identical_candidates
+                    )
+                except InvalidAction:
+                    pass
+            try:
+                proposed_type = parse_action(proposal, screen_size)["action_type"]
+                same_type = [
+                    candidate for candidate in candidates
+                    if json.loads(candidate)["action_type"] == proposed_type
+                ]
+            except InvalidAction:
+                same_type = []
+            if self.max_identical_actions and history:
+                try:
+                    proposed_action = parse_action(proposal, screen_size)
+                    proposed_signature = action_signature(proposed_action)
+                    repeated = 0
+                    for previous in reversed(history):
+                        if action_signature(parse_action(previous, screen_size)) != proposed_signature:
+                            break
+                        repeated += 1
+                    if proposed_signature[0] == "pan" and repeated >= self.max_identical_actions:
+                        candidates = [
+                            item for item in candidates
+                            if action_signature(json.loads(item)) != proposed_signature
+                        ]
+                        same_type = [
+                            item for item in same_type
+                            if action_signature(json.loads(item)) != proposed_signature
+                        ]
+                except InvalidAction:
+                    pass
+            return self._rank_candidates(
+                instruction, image, history, screen_size, same_type or candidates,
+            )
+        return self._generate(instruction, image, history, screen_size)

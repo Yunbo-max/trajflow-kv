@@ -1,6 +1,6 @@
 {
-  "status": "offline_signal_online_no_go",
-  "conclusion": "Return-conditioned KV learning produces a repeatable held-out trajectory-separation signal beyond shuffled returns and successful-action CE, but has not improved end-to-end free-form AndroidWorld success on the system tasks.",
+  "status": "single_task_online_go_cross_task_pending",
+  "conclusion": "Return-conditioned KV learning produces a repeatable held-out trajectory-separation signal and a paired online gain on Bluetooth under the same structured action policy. Wi-Fi still fails, so cross-task online validation is not yet complete.",
   "architecture": {
     "backbone": "Qwen2.5-VL-3B-Instruct",
     "target": "V only",
@@ -46,10 +46,26 @@
     "mean_correct_margin": -0.1718801452,
     "interpretation": "Best joint offline result: preserves return separation and improves ranking, but does not change top-1 decisions."
   },
+  "fork_and_coordinate_preferences": {
+    "fork_pairs": 65,
+    "synthetic_coordinate_pairs": 126,
+    "best_return_margin": 0.3684685985,
+    "top1": 0.5,
+    "mrr": 0.6722222222,
+    "type_conditioned_top1": 0.8333333333,
+    "type_conditioned_mrr": 0.8888888889,
+    "overfit_control": "Ten click-focused epochs increased return margin to 0.4130 but collapsed Top-1 to 0.1667; rejected by the ranking gate."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",
-    "candidate_ranking": "All tested deterministic Wi-Fi rollouts repeatedly selected swipe-down and failed.",
-    "go_no_go": "Do not claim end-to-end method success or start full flow/critic scaling yet. First solve structured action selection and demonstrate paired online gains."
+    "candidate_ranking": "Hierarchical type-then-parameter ranking plus a generic loop guard converts the learned coordinate preference into executable actions.",
+    "bluetooth_paired": {
+      "deterministic": {"baseline": "0/1", "return_fork_coordinate_kv": "1/1"},
+      "temperature_0.2_seeds_201_202_203": {"baseline": "0/3", "return_fork_coordinate_kv": "3/3"},
+      "combined": {"baseline": "0/4", "return_fork_coordinate_kv": "4/4"}
+    },
+    "wifi_probe": "Both baseline and KV remain unsuccessful. The policy clicks before the quick-settings shade is fully expanded, identifying state routing as the remaining failure.",
+    "go_no_go": "Single-task online gate passed reproducibly; cross-task gate remains pending. Do not claim broad end-to-end success until a learned state router or equivalent structured policy passes Wi-Fi and additional tasks."
   }
 }
