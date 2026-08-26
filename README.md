@@ -97,6 +97,20 @@ task instance so the task-group baseline is meaningful:
 .venv/bin/python -m trajflow_kv.train --config configs/qwen_androidworld.yaml
 ```
 
+For a paired check, collect baseline and candidate rollouts with the same
+`--seed`, task, horizon, and temperature, then run:
+
+```bash
+.venv/bin/python scripts/compare_rollouts.py \
+  --baseline data/androidworld/eval_pre.jsonl \
+  --candidate data/androidworld/eval_post.jsonl \
+  --output outputs/qwen-androidworld-return/controlled_eval.json
+```
+
+The summary reports paired improvements/regressions, success-rate delta, and
+invalid-action counts. Small smoke samples are a pipeline check, not evidence
+of a statistically significant policy improvement.
+
 The collector uses the official `/screenshot`, `/execute_action`, task
 initialize/tear-down, goal, and score endpoints. Screenshots and canonical
 actions are saved per step. Invalid model JSON becomes a recorded `wait`
@@ -121,10 +135,13 @@ The verified software-emulation setup is reproducible with:
 The setup pins AndroidWorld commit `3e508885`, installs API 33/Pixel 6 and a
 Python 3.11 environment, and applies `patches/androidworld-tcg.patch`. The patch
 makes ADB timeouts configurable, allows screenshot-only operation without the
-accessibility forwarder, and makes first-time app setup optional. The runner
-uses `-accel off`, registers an Android ActivityController so slow TCG boot does
-not repeatedly trip the `system_server` watchdog, skips Setup Wizard, and
-serves the official API on `127.0.0.1:5000`.
+accessibility forwarder, and makes first-time app setup optional. For smoke
+tasks it also enables lightweight task initialization, skipping date and app
+snapshot resets that are not required by `OpenAppTaskEval`. Do not use that
+mode for tasks whose evaluator depends on restored app state. The runner uses
+`-accel off`, increases Android's watchdog timeout multiplier, retries an
+Android ActivityController during boot, skips Setup Wizard, and serves the
+official API on `127.0.0.1:5000`.
 
 On the reference RTX A4000 container, first boot took roughly 25 minutes.
 Native AndroidWorld initialization then returned a 1080x2400 screenshot in

@@ -153,6 +153,7 @@ def main():
     parser.add_argument("--max-trajectories", type=int)
     parser.add_argument("--data-path")
     parser.add_argument("--output-dir")
+    parser.add_argument("--projector-checkpoint")
     args = parser.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text())
     if args.max_trajectories is not None:
@@ -161,6 +162,8 @@ def main():
         cfg["data_path"] = args.data_path
     if args.output_dir is not None:
         cfg["output_dir"] = args.output_dir
+    if args.projector_checkpoint is not None:
+        cfg["projector_checkpoint"] = args.projector_checkpoint
     random.seed(cfg["seed"]); torch.manual_seed(cfg["seed"])
     model, bundle, history = train_toy(cfg) if cfg["toy"] else train_qwen(cfg)
     output = Path(cfg["output_dir"]); output.mkdir(parents=True, exist_ok=True)

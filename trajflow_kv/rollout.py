@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -23,11 +23,14 @@ class RolloutResult:
     return_: float
     steps: list[dict[str, Any]]
     invalid_actions: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def as_record(self) -> dict[str, Any]:
+        metadata = dict(self.metadata)
+        metadata["invalid_actions"] = self.invalid_actions
         return {"task_id": self.task_id, "instruction": self.instruction,
                 "return": self.return_, "steps": self.steps,
-                "metadata": {"invalid_actions": self.invalid_actions}}
+                "metadata": metadata}
 
 
 def stable_task_id(task_name: str, instruction: str, params: Any) -> str:
@@ -40,6 +43,7 @@ def collect_rollout(
     image_dir: Path, get_pixels: Callable[[], Any],
     screen_size: Callable[[], tuple[int, int]],
     execute: Callable[[dict[str, Any]], None], evaluate: Callable[[], float],
+    rollout_metadata: dict[str, Any] | None = None,
 ) -> RolloutResult:
     """Collect one trajectory using callbacks supplied by an environment adapter."""
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -67,7 +71,10 @@ def collect_rollout(
         history.append(raw)
         if action["action_type"] == "status":
             break
-    return RolloutResult(task_id, instruction, float(evaluate()), steps, invalid)
+    return RolloutResult(
+        task_id, instruction, float(evaluate()), steps, invalid,
+        metadata=dict(rollout_metadata or {}),
+    )
 
 
 def append_jsonl(path: str | Path, results: list[RolloutResult]) -> None:

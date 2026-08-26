@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import random
 from pathlib import Path
+
+import numpy as np
+import torch
 
 from trajflow_kv.androidworld_http import AndroidWorldHTTPClient
 from trajflow_kv.qwen_policy import QwenKVPolicy
@@ -22,8 +26,14 @@ def main():
     parser.add_argument("--checkpoint", default="outputs/qwen-aitw/kv_projectors.pt")
     parser.add_argument("--output", default="data/androidworld/rollouts.jsonl")
     parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
 
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
     client = AndroidWorldHTTPClient(args.server_url, timeout=args.http_timeout)
     if not client.health():
         raise RuntimeError(
@@ -48,6 +58,12 @@ def main():
                 get_pixels=client.screenshot, screen_size=lambda: client.screen_size,
                 execute=client.execute,
                 evaluate=lambda: client.score(args.task, args.task_index),
+                rollout_metadata={
+                    "rollout_index": rollout_index,
+                    "seed": args.seed,
+                    "temperature": args.temperature,
+                    "checkpoint": args.checkpoint,
+                },
             )
             append_jsonl(args.output, [result])
             results.append(result)

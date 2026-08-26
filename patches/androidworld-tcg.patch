@@ -77,3 +77,21 @@ index 583b40e..bf8f313 100644
        adb_path="/opt/android/platform-tools/adb",
    )
    task_registry = aw_registry_module.TaskRegistry()
+diff --git a/android_world/task_evals/task_eval.py b/android_world/task_evals/task_eval.py
+index bce5a4e..a30f27f 100644
+--- a/android_world/task_evals/task_eval.py
++++ b/android_world/task_evals/task_eval.py
+@@ -18,3 +18,4 @@
+ import abc
++import os
+ import random
+ from typing import Any
+@@ -145,4 +146,5 @@ class TaskEval(abc.ABC):
+     env.interaction_cache = ""  # pyrefly: ignore[read-only]
+-    self.initialize_device_time(env)
+-    self._initialize_apps(env)
++    if os.environ.get("ANDROID_WORLD_LIGHTWEIGHT_TASK_INIT", "0") != "1":
++      self.initialize_device_time(env)
++      self._initialize_apps(env)
+     logging.info("Initializing %s", self.name)
+     if self.initialized:

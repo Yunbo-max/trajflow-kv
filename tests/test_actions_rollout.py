@@ -60,10 +60,12 @@ def test_mixed_return_rollout_schema(tmp_path):
         get_pixels=lambda: np.zeros((20, 10, 3), dtype=np.uint8),
         screen_size=lambda: (10, 20), execute=executed.append,
         evaluate=lambda: 1.0,
+        rollout_metadata={"seed": 7},
     )
     record = result.as_record()
     assert record["return"] == 1.0 and len(record["steps"]) == 2
     assert record["metadata"]["invalid_actions"] == 1
+    assert record["metadata"]["seed"] == 7
     assert executed[0] == {"action_type": "wait"}
     assert record["steps"][0]["model_output"] == "not json"
     assert json.loads(record["steps"][1]["action"])["action_type"] == "status"
