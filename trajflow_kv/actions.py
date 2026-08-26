@@ -31,11 +31,19 @@ def _extract_json(text: str) -> dict[str, Any]:
         start = text.find("{")
         if start < 0:
             raise InvalidAction("model output contains no JSON object")
+        # Small VLMs occasionally emit otherwise valid JSON with an unquoted
+        # key (for example ``{"x": 12, y: 34}``). Repair keys only at object
+        # boundaries; values and free-form input text remain untouched.
+        candidate = re.sub(
+            r'([,{]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)',
+            r'\1"\2"\3',
+            text[start:],
+        )
         try:
             # Decode the first complete object and tolerate trailing reasoning
             # or a second proposal. The executed canonical action is recorded
             # separately from the untouched model output.
-            value, _ = json.JSONDecoder().raw_decode(text[start:])
+            value, _ = json.JSONDecoder().raw_decode(candidate)
         except json.JSONDecodeError as error:
             raise InvalidAction(f"invalid action JSON: {error.msg}") from error
     if not isinstance(value, dict):
@@ -46,6 +54,16 @@ def _extract_json(text: str) -> dict[str, Any]:
 def parse_action(text: str, screen_size: tuple[int, int]) -> dict[str, Any]:
     """Parse and validate model output against AndroidWorld JSONAction."""
     raw = _extract_json(text)
+    # Normalize common Qwen/AITW aliases before strict schema validation.
+    aliases = {"tap": "click", "back": "navigate_back", "home": "navigate_home"}
+    if raw.get("action_type") in aliases:
+        raw["action_type"] = aliases[raw["action_type"]]
+    if raw.get("action_type") == "terminate":
+        status = str(raw.pop("status", "success")).lower()
+        raw["action_type"] = "status"
+        raw["goal_status"] = (
+            "complete" if status in {"success", "complete", "done"} else "infeasible"
+        )
     # Qwen/AITW commonly emits point or two-point coordinate fields. Convert
     # those at the environment boundary to AndroidWorld's JSONAction schema.
     if "coordinate" in raw and isinstance(raw["coordinate"], list) and len(raw["coordinate"]) == 2:

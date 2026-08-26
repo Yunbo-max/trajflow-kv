@@ -9,11 +9,16 @@ from PIL import Image
 from .projector import attach_kv_projectors
 
 
-SYSTEM = """You control Android. Return exactly one JSON action and no prose.
+SYSTEM = """You control Android. Return exactly one valid JSON action and no prose.
+Use double quotes around every key and string. Inspect the current screenshot and
+take one action that advances the task. Do not claim completion until the visible
+state proves the task is complete. Coordinates refer to the full screen resolution
+given below, not the resized image tensor.
 Valid examples:
 {"action_type":"click","x":120,"y":300}
 {"action_type":"scroll","direction":"down"}
 {"action_type":"input_text","text":"hello"}
+{"action_type":"open_app","app_name":"Contacts"}
 {"action_type":"navigate_back"}
 {"action_type":"status","goal_status":"complete"}
 Coordinates may be absolute pixels or normalized floats in [0,1]."""

@@ -11,6 +11,21 @@ index 4689b45..6e3fc54 100644
  
  # pylint: disable=line-too-long
  # Maps app names to the activity that should be launched to open the app.
+@@ -701,9 +701,12 @@ def launch_app(
+   if activity is None:
+     #  If the app name is not in the mapping, assume it is a package name.
+     response = issue_generic_request(
+-        ['shell', 'monkey', '-p', app_name, '1'], env, timeout_sec=5
++        ['shell', 'monkey', '-p', app_name, '1'], env,
++        timeout_sec=_DEFAULT_TIMEOUT_SECS,
+     )
+     logging.info('Launching app by package name, response: %r', response)
+     return app_name
+-  start_activity(activity, extra_args=[], env=env, timeout_sec=5)
++  start_activity(
++      activity, extra_args=[], env=env, timeout_sec=_DEFAULT_TIMEOUT_SECS
++  )
+   return app_name
 diff --git a/android_world/env/android_world_controller.py b/android_world/env/android_world_controller.py
 index dda5352..0adc871 100644
 --- a/android_world/env/android_world_controller.py

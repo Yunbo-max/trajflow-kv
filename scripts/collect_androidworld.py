@@ -35,9 +35,11 @@ def main():
     policy = QwenKVPolicy(args.model, args.checkpoint, temperature=args.temperature)
     results = []
     for rollout_index in range(args.rollouts):
-        client.reset(go_home=True)
+        initialized = False
         try:
+            client.reset(go_home=True)
             client.initialize_task(args.task, args.task_index)
+            initialized = True
             run_id = f"{task_id}-r{rollout_index:03d}"
             result = collect_rollout(
                 policy=policy, instruction=instruction, task_id=task_id,
@@ -50,8 +52,18 @@ def main():
             append_jsonl(args.output, [result])
             results.append(result)
             print(f"rollout={rollout_index} return={result.return_} invalid={result.invalid_actions}")
+        except Exception as error:  # Keep a long stochastic collection batch alive.
+            print(f"rollout={rollout_index} error={type(error).__name__}: {error}", flush=True)
         finally:
-            client.tear_down_task(args.task, args.task_index)
+            if initialized:
+                try:
+                    client.tear_down_task(args.task, args.task_index)
+                except Exception as error:
+                    print(
+                        f"rollout={rollout_index} teardown_error="
+                        f"{type(error).__name__}: {error}",
+                        flush=True,
+                    )
     values = [result.return_ for result in results]
     print(f"collected={len(values)} returns={values} output={args.output}")
 

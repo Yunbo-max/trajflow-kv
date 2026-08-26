@@ -89,10 +89,11 @@ task instance so the task-group baseline is meaningful:
 ```bash
 .venv/bin/python scripts/collect_androidworld.py \
   --server-url http://ANDROID_HOST:5000 \
-  --task ContactsAddContact --task-index 0 \
-  --rollouts 8 --temperature 0.7
+  --task OpenAppTaskEval --task-index 0 \
+  --rollouts 8 --max-steps 1 --temperature 1.5 \
+  --output data/androidworld/open_app_rollouts.jsonl
 
-.venv/bin/python scripts/validate_rollouts.py data/androidworld/rollouts.jsonl
+.venv/bin/python scripts/validate_rollouts.py data/androidworld/open_app_rollouts.jsonl
 .venv/bin/python -m trajflow_kv.train --config configs/qwen_androidworld.yaml
 ```
 

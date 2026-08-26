@@ -42,6 +42,15 @@ def test_parser_uses_first_json_and_tolerates_trailing_reasoning():
     assert action == {"action_type": "click", "x": 10, "y": 20}
 
 
+def test_action_parser_repairs_bare_key_and_terminate_alias():
+    assert parse_action('{"action_type":"click","x":125, y:330}', (1080, 2400)) == {
+        "action_type": "click", "x": 125, "y": 330,
+    }
+    assert parse_action(
+        '{"action_type":"terminate","status":"success"}', (1080, 2400)
+    ) == {"action_type": "status", "goal_status": "complete"}
+
+
 def test_mixed_return_rollout_schema(tmp_path):
     executed = []
     policy = SequencePolicy(["not json", '{"action_type":"status","goal_status":"complete"}'])
