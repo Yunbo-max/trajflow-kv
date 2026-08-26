@@ -10,14 +10,16 @@ import torch
 from PIL import Image
 
 from trajflow_kv.data import load_jsonl
-from trajflow_kv.projector import attach_kv_projectors
+from trajflow_kv.projector import attach_kv_projectors, load_merged_weights
 from trajflow_kv.qwen_policy import build_action_prompt
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="models/Qwen2.5-VL-3B-Instruct")
-    parser.add_argument("--checkpoint", required=True)
+    checkpoint_group = parser.add_mutually_exclusive_group(required=True)
+    checkpoint_group.add_argument("--checkpoint")
+    checkpoint_group.add_argument("--merged-checkpoint")
     parser.add_argument("--data", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--rank", type=int, default=8)
@@ -33,12 +35,16 @@ def main() -> None:
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         args.model, dtype=torch.bfloat16, device_map="cuda"
     ).eval()
-    bundle = attach_kv_projectors(
-        model, args.rank, args.alpha, args.target, args.last_n_layers
-    )
-    bundle.modules.load_state_dict(
-        torch.load(args.checkpoint, map_location="cuda", weights_only=True)
-    )
+    bundle = None
+    if args.checkpoint:
+        bundle = attach_kv_projectors(
+            model, args.rank, args.alpha, args.target, args.last_n_layers
+        )
+        bundle.modules.load_state_dict(
+            torch.load(args.checkpoint, map_location="cuda", weights_only=True)
+        )
+    else:
+        load_merged_weights(model, args.merged_checkpoint)
 
     rows = []
     with torch.inference_mode():
@@ -72,7 +78,8 @@ def main() -> None:
                 labels = batch["input_ids"].clone()
                 labels[:, :prompt_batch["input_ids"].shape[1]] = -100
                 output = model(**batch, labels=labels)
-                transport_energies.append(float(bundle.energy()))
+                if bundle is not None:
+                    transport_energies.append(float(bundle.energy()))
                 valid = int((labels != -100).sum())
                 logprob_sum += -float(output.loss) * valid
                 token_count += valid
@@ -82,7 +89,10 @@ def main() -> None:
                 "return": float(trajectory["return"]),
                 "tokens": token_count,
                 "mean_token_logprob": logprob_sum / max(token_count, 1),
-                "mean_transport_energy": sum(transport_energies) / len(transport_energies),
+                "mean_transport_energy": (
+                    sum(transport_energies) / len(transport_energies)
+                    if transport_energies else None
+                ),
             })
 
     positive = [row["mean_token_logprob"] for row in rows if row["return"] > 0]
@@ -90,7 +100,7 @@ def main() -> None:
     if not positive or not negative:
         raise ValueError("return-margin evaluation requires successes and failures")
     summary = {
-        "checkpoint": args.checkpoint,
+        "checkpoint": args.checkpoint or args.merged_checkpoint,
         "data": args.data,
         "trajectories": len(rows),
         "positive_count": len(positive),
@@ -98,9 +108,10 @@ def main() -> None:
         "positive_mean_token_logprob": sum(positive) / len(positive),
         "negative_mean_token_logprob": sum(negative) / len(negative),
         "return_margin": sum(positive) / len(positive) - sum(negative) / len(negative),
-        "mean_transport_energy": sum(
-            row["mean_transport_energy"] for row in rows
-        ) / len(rows),
+        "mean_transport_energy": (
+            sum(row["mean_transport_energy"] for row in rows) / len(rows)
+            if bundle is not None else None
+        ),
         "rows": rows,
     }
     output = Path(args.output)

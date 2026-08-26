@@ -98,3 +98,39 @@ def attach_kv_projectors(
 
 def trainable_parameters(bundle: HookedProjectors) -> Iterable[nn.Parameter]:
     return bundle.modules.parameters()
+
+
+def merge_projectors_into_model(model: nn.Module, bundle: HookedProjectors) -> dict[str, torch.Tensor]:
+    """Fold linear residual projectors into their K/V projection weights."""
+    modules = dict(model.named_modules())
+    merged = {}
+    bundle.close()
+    with torch.no_grad():
+        for name, projector in zip(bundle.names, bundle.modules, strict=True):
+            linear = modules[name]
+            delta = (
+                projector.up.weight.float()
+                @ projector.down.weight.float()
+                @ linear.weight.float()
+            ) * projector.scale
+            linear.weight.add_(delta.to(linear.weight.dtype))
+            merged[f"{name}.weight"] = linear.weight.detach().cpu().clone()
+            if linear.bias is not None:
+                bias_delta = (
+                    projector.up.weight.float()
+                    @ projector.down.weight.float()
+                    @ linear.bias.float()
+                ) * projector.scale
+                linear.bias.add_(bias_delta.to(linear.bias.dtype))
+                merged[f"{name}.bias"] = linear.bias.detach().cpu().clone()
+    return merged
+
+
+def load_merged_weights(model: nn.Module, checkpoint: str) -> list[str]:
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    weights = payload.get("weights", payload)
+    parameters = dict(model.named_parameters())
+    with torch.no_grad():
+        for name, value in weights.items():
+            parameters[name].copy_(value.to(parameters[name].device, parameters[name].dtype))
+    return sorted(weights)

@@ -93,6 +93,14 @@
     "projected_best_of_128_mse": {"wifi": 0.0024686565, "bluetooth": 0.0924078152},
     "decision": "Candidate-coverage go, average-policy no-go. Flow reaches strong best-of-N endpoints after structured projection, but mean samples trail behavior cloning and the current critic cannot reliably select them."
   },
+  "internalization": {
+    "method": "Exact algebraic folding of each linear KV residual into its underlying V-projection weight and bias; no inference hook.",
+    "merged_layers": 8,
+    "merged_tensors": 16,
+    "hooked_teacher": {"return_margin": 0.3766525348, "top1": 0.5, "mrr": 0.6722222222, "type_conditioned_top1": 0.8333333333, "type_conditioned_mrr": 0.8888888889},
+    "merged_student": {"return_margin": 0.3836079829, "top1": 0.5, "mrr": 0.6722222222, "type_conditioned_top1": 0.8333333333, "type_conditioned_mrr": 0.8888888889},
+    "decision": "Go. Ranking metrics are identical without hooks; the small bf16 margin difference is positive."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",

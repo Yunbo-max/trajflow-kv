@@ -6,7 +6,7 @@ from trajflow_kv.objective import (
     shuffle_within_tasks,
     trajectory_policy_loss,
 )
-from trajflow_kv.projector import attach_kv_projectors
+from trajflow_kv.projector import attach_kv_projectors, merge_projectors_into_model
 from trajflow_kv.forks import build_coordinate_fork_pairs, build_fork_pairs
 from trajflow_kv.qwen_policy import action_signature, exclude_repeated_candidates
 from trajflow_kv.state_router import routed_action_type, router_features
@@ -40,6 +40,17 @@ def test_last_n_layers_limits_hook_count():
         model, rank=2, alpha=1.0, target="both", last_n_layers=1
     )
     assert len(bundle.modules) == 2
+
+
+def test_projector_merge_matches_hooked_linear_output():
+    model = Tiny().eval()
+    bundle = attach_kv_projectors(model, rank=2, alpha=2.0, target="v")
+    bundle.modules[0].up.weight.data.normal_(std=0.02)
+    value = torch.randn(3, 8)
+    hooked = model(value).detach()
+    merged = merge_projectors_into_model(model, bundle)
+    assert list(merged) == ["v_proj.weight", "v_proj.bias"]
+    assert torch.allclose(model(value), hooked, atol=1e-5, rtol=1e-5)
 
 
 def test_return_objective():

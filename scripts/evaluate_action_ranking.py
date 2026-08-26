@@ -11,7 +11,7 @@ from PIL import Image
 
 from trajflow_kv.actions import canonical_action
 from trajflow_kv.data import load_jsonl
-from trajflow_kv.projector import attach_kv_projectors
+from trajflow_kv.projector import attach_kv_projectors, load_merged_weights
 from trajflow_kv.qwen_policy import build_action_prompt
 
 
@@ -42,7 +42,9 @@ def candidates(instruction: str, correct: str) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="models/Qwen2.5-VL-3B-Instruct")
-    parser.add_argument("--checkpoint", required=True)
+    checkpoint_group = parser.add_mutually_exclusive_group(required=True)
+    checkpoint_group.add_argument("--checkpoint")
+    checkpoint_group.add_argument("--merged-checkpoint")
     parser.add_argument("--data", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--rank", type=int, default=8)
@@ -57,12 +59,15 @@ def main() -> None:
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         args.model, dtype=torch.bfloat16, device_map="cuda"
     ).eval()
-    bundle = attach_kv_projectors(
-        model, args.rank, args.alpha, args.target, args.last_n_layers
-    )
-    bundle.modules.load_state_dict(
-        torch.load(args.checkpoint, map_location="cuda", weights_only=True)
-    )
+    if args.checkpoint:
+        bundle = attach_kv_projectors(
+            model, args.rank, args.alpha, args.target, args.last_n_layers
+        )
+        bundle.modules.load_state_dict(
+            torch.load(args.checkpoint, map_location="cuda", weights_only=True)
+        )
+    else:
+        load_merged_weights(model, args.merged_checkpoint)
     rows = []
     with torch.inference_mode():
         for trajectory_index, trajectory in enumerate(load_jsonl(args.data)):
@@ -117,7 +122,7 @@ def main() -> None:
                     ),
                 })
     summary = {
-        "checkpoint": args.checkpoint,
+        "checkpoint": args.checkpoint or args.merged_checkpoint,
         "steps": len(rows),
         "top1_accuracy": sum(row["rank"] == 1 for row in rows) / len(rows),
         "mrr": sum(1.0 / row["rank"] for row in rows) / len(rows),

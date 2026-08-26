@@ -68,6 +68,14 @@ mean behavior-cloning baselines are better than average flow samples, and the
 critic gate above cannot yet select the best endpoints reliably. The honest
 status is therefore candidate-coverage go, average-policy/critic-chain no-go.
 
+For the current linear KV residual, internalization can be exact rather than
+approximate: `y'=(I+AB)y` and `y=Wx` imply a merged projection
+`W'=(I+AB)W` (and the same transform for bias). Folding the best checkpoint
+into eight V projections removes all inference hooks. The hooked teacher and
+merged student have identical held-out Top-1 (`0.5`), MRR (`0.6722`), and
+type-conditioned Top-1/MRR (`0.8333/0.8889`); return margin is `0.3767` versus
+`0.3836`, with the small difference attributable to bf16 merge rounding.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash
