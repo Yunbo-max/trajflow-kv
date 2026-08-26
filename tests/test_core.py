@@ -10,6 +10,7 @@ from trajflow_kv.projector import attach_kv_projectors
 from trajflow_kv.forks import build_coordinate_fork_pairs, build_fork_pairs
 from trajflow_kv.qwen_policy import action_signature, exclude_repeated_candidates
 from trajflow_kv.state_router import routed_action_type, router_features
+from trajflow_kv.critic import TrajectoryCritic, critic_features
 
 
 class Tiny(nn.Module):
@@ -107,3 +108,12 @@ def test_state_router_features_and_labels():
     assert features.shape == (64 * 64 * 3 + 1 + 32,)
     assert routed_action_type('{"action_type":"swipe","direction":"down"}') == "pan"
     assert routed_action_type('{"action_type":"click","x":1,"y":2}') == "click"
+
+
+def test_critic_features_keep_logprob_differentiable():
+    logprob = torch.tensor(-1.0, requires_grad=True)
+    trajectory = {"steps": [{"action": '{"action_type":"click","x":1,"y":2}'}]}
+    features = critic_features(trajectory, logprob)
+    critic = TrajectoryCritic(len(features))
+    critic(features).backward()
+    assert logprob.grad is not None

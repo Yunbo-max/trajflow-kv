@@ -51,6 +51,14 @@ to `6.72e-5` (4.47x lower). `lambda_energy=100000` reaches `8.19e-7` but drops
 margin below the initial checkpoint, demonstrating the expected Pareto
 trade-off and providing a practical low-energy setting.
 
+The learned-critic gate is currently negative. An MLP critic trained on 29
+system trajectories obtains train AUC `1.0` but only held-out AUC
+`0.75–0.8125` with saturated probabilities; a regularized linear critic is
+unstable across seeds (`0.375/0.625/0.625`) and underperforms raw trajectory
+log-probability ranking (`0.75`). The critic code is retained for
+reproduction, but critic-guided KV backprop is deliberately not reported as
+an improvement until substantially more independent trajectories exist.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash
