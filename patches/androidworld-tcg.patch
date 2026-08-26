@@ -54,6 +54,35 @@ index dda5352..0adc871 100644
 +      os.environ.get('ANDROID_WORLD_A11Y_METHOD', A11yMethod.A11Y_FORWARDER_APP.value)
 +  )
 +  return AndroidWorldController(android_env_instance, a11y_method=a11y_method)
+diff --git a/android_world/env/interface.py b/android_world/env/interface.py
+index 0aab475..23a58af 100644
+--- a/android_world/env/interface.py
++++ b/android_world/env/interface.py
+@@ -16,6 +16,7 @@
+ 
+ import abc
+ import dataclasses
++import os
+ import time
+ from typing import Any, Optional, Self
+ 
+@@ -344,7 +345,15 @@ class AsyncAndroidEnv(AsyncEnv):
+ 
+   @property
+   def logical_screen_size(self) -> tuple[int, int]:
+-    return adb_utils.get_logical_screen_size(self.controller)
++    if os.environ.get('ANDROID_WORLD_USE_PHYSICAL_SCREEN_SIZE', '0') == '1':
++      return self.device_screen_size
++    try:
++      return adb_utils.get_logical_screen_size(self.controller)
++    except Exception:  # Software-emulated system_server can reject dumpsys.
++      logging.warning(
++          'Falling back to physical screen size after logical-size query failed.'
++      )
++      return self.device_screen_size
+ 
+   def close(self) -> None:
+     try:
 diff --git a/server/android_server.py b/server/android_server.py
 index 583b40e..bf8f313 100644
 --- a/server/android_server.py

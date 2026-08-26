@@ -9,6 +9,7 @@ from trajflow_kv.objective import (
 from trajflow_kv.projector import attach_kv_projectors
 from trajflow_kv.forks import build_coordinate_fork_pairs, build_fork_pairs
 from trajflow_kv.qwen_policy import action_signature, exclude_repeated_candidates
+from trajflow_kv.state_router import routed_action_type, router_features
 
 
 class Tiny(nn.Module):
@@ -98,3 +99,11 @@ def test_exact_candidate_loop_guard_keeps_other_click_coordinates():
     ]
     kept = exclude_repeated_candidates(candidates, [candidates[0]], (100, 100), 1)
     assert kept == [candidates[1]]
+
+
+def test_state_router_features_and_labels():
+    from PIL import Image
+    features = router_features(Image.new("RGB", (40, 80), "white"), 3)
+    assert features.shape == (24 * 24 * 3 + 1,)
+    assert routed_action_type('{"action_type":"swipe","direction":"down"}') == "pan"
+    assert routed_action_type('{"action_type":"click","x":1,"y":2}') == "click"

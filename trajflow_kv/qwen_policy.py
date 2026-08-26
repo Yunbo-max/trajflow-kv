@@ -62,7 +62,8 @@ class QwenKVPolicy:
                  last_n_layers: int | None = None,
                  candidate_mode: str | None = None,
                  max_identical_actions: int | None = None,
-                 max_identical_candidates: int | None = None):
+                 max_identical_candidates: int | None = None,
+                 state_router_checkpoint: str | None = None):
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
         self.processor = AutoProcessor.from_pretrained(model_path, max_pixels=max_pixels)
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -84,6 +85,11 @@ class QwenKVPolicy:
             if max_identical_candidates is not None
             else max_identical_actions
         )
+        if state_router_checkpoint:
+            from .state_router import StateRouter
+            self.state_router = StateRouter.load(state_router_checkpoint)
+        else:
+            self.state_router = None
 
     def _system_candidates(self, instruction: str) -> list[str]:
         lower = instruction.lower()
@@ -166,7 +172,7 @@ class QwenKVPolicy:
                 instruction, image, history, screen_size, candidates,
             )
         if self.candidate_mode == "system_hierarchical":
-            proposal = self._generate(instruction, image, history, screen_size)
+            proposal = None
             if self.max_identical_candidates and history:
                 try:
                     candidates = exclude_repeated_candidates(
@@ -175,14 +181,21 @@ class QwenKVPolicy:
                 except InvalidAction:
                     pass
             try:
-                proposed_type = parse_action(proposal, screen_size)["action_type"]
+                if self.state_router is not None:
+                    proposed_type = self.state_router.predict(image, len(history))
+                else:
+                    proposal = self._generate(instruction, image, history, screen_size)
+                    proposed_type = parse_action(proposal, screen_size)["action_type"]
                 same_type = [
                     candidate for candidate in candidates
-                    if json.loads(candidate)["action_type"] == proposed_type
+                    if (
+                        action_signature(json.loads(candidate))[0] == proposed_type
+                        or json.loads(candidate)["action_type"] == proposed_type
+                    )
                 ]
             except InvalidAction:
                 same_type = []
-            if self.max_identical_actions and history:
+            if self.max_identical_actions and history and proposal is not None:
                 try:
                     proposed_action = parse_action(proposal, screen_size)
                     proposed_signature = action_signature(proposed_action)

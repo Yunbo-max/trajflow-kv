@@ -56,6 +56,15 @@
     "type_conditioned_mrr": 0.8888888889,
     "overfit_control": "Ten click-focused epochs increased return margin to 0.4130 but collapsed Top-1 to 0.1667; rejected by the ranking gate."
   },
+  "state_router": {
+    "input": "24x24 RGB screenshot plus normalized history length",
+    "train_examples": 46,
+    "train_accuracy": 0.9565217391,
+    "heldout_examples": 6,
+    "heldout_accuracy": 0.8333333333,
+    "heldout_click_accuracy": "3/3",
+    "online_status": "Pending rerun after software-emulator rendering/system_server instability; black-screen router probes are excluded."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",

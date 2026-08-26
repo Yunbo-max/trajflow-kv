@@ -35,6 +35,14 @@ and three temperature-0.2 seeds. Wi-Fi still fails because the policy acts
 before the quick-settings shade is fully expanded. The next gate is therefore
 learned state routing and cross-task online replication.
 
+A lightweight screenshot-conditioned state router is also included. On the
+current independent system-task split it reaches `5/6` action-type accuracy
+(`3/3` on click states). Its cross-task online result is still pending because
+the software-only emulator developed a black-render/system-server failure;
+those corrupted probes are explicitly excluded. The committed AndroidWorld
+patch now permits a physical-size fallback so action execution does not depend
+on a fragile `dumpsys input` call under TCG.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash
