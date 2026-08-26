@@ -114,6 +114,13 @@
     "v_after_fork_coordinate_mrr": 0.6722222222,
     "interpretation": "K learns the larger pure-return separation increment, while V responds more strongly to state/fork/coordinate preference shaping."
   },
+  "rank_ablation_epoch_10": {
+    "initialization": "SVD reparameterization of the same rank-8 AITW warm-start effective residual",
+    "rank_4": {"return_margin": 0.2093837360, "mean_transport_energy": 0.0000523077, "top1": 0.5, "mrr": 0.6210317460, "mean_correct_margin": -0.2155212741},
+    "rank_8": {"return_margin": 0.2208706249, "mean_transport_energy": 0.0003004442, "top1": 0.5, "mrr": 0.6210317460, "mean_correct_margin": -0.2316913779},
+    "rank_16": {"return_margin": 0.2129268866, "mean_transport_energy": 0.0000365378, "top1": 0.5, "mrr": 0.6210317460, "mean_correct_margin": -0.2125677976},
+    "interpretation": "Rank 8 gives the strongest return separation; rank 16 is saturated on the current sample, and rank 4 is the lower-energy budget option."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",

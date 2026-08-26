@@ -83,6 +83,12 @@ K reaches margin/MRR `0.2818/0.6389` whereas V reaches
 `0.3767/0.6722`. This suggests K is stronger for coarse trajectory
 separation and V for concrete action/coordinate shaping.
 
+Using SVD to reparameterize the same AITW warm-start makes the rank ablation
+comparable. At 10 epochs, ranks `4/8/16` obtain return margins
+`0.2094/0.2209/0.2129`; all have Top-1/MRR `0.5/0.6210`. Rank 8 is best for
+return separation, rank 16 is already saturated on 41 trajectories, and rank
+4 is a reasonable lower-energy budget point.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash

@@ -134,3 +134,29 @@ def load_merged_weights(model: nn.Module, checkpoint: str) -> list[str]:
         for name, value in weights.items():
             parameters[name].copy_(value.to(parameters[name].device, parameters[name].dtype))
     return sorted(weights)
+
+
+def resize_low_rank_factors(
+    down: torch.Tensor,
+    up: torch.Tensor,
+    source_alpha: float,
+    target_rank: int,
+    target_alpha: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """SVD-reparameterize a residual map at another rank and scale."""
+    source_scale = source_alpha / down.shape[0]
+    target_scale = target_alpha / target_rank
+    effective = source_scale * up.float() @ down.float()
+    left, singular, right = torch.linalg.svd(effective, full_matrices=False)
+    take = min(target_rank, len(singular))
+    new_up = torch.zeros(up.shape[0], target_rank)
+    new_down = torch.zeros(target_rank, down.shape[1])
+    for index in range(take):
+        if singular[index] > 1e-10:
+            root = torch.sqrt(singular[index] / target_scale)
+            new_up[:, index] = left[:, index] * root
+            new_down[index] = right[index] * root
+        else:
+            # A zero-up/nonzero-down slot preserves the map but can learn.
+            new_down[index] = right[index]
+    return new_down.to(down.dtype), new_up.to(up.dtype)

@@ -6,7 +6,9 @@ from trajflow_kv.objective import (
     shuffle_within_tasks,
     trajectory_policy_loss,
 )
-from trajflow_kv.projector import attach_kv_projectors, merge_projectors_into_model
+from trajflow_kv.projector import (
+    attach_kv_projectors, merge_projectors_into_model, resize_low_rank_factors,
+)
 from trajflow_kv.forks import build_coordinate_fork_pairs, build_fork_pairs
 from trajflow_kv.qwen_policy import action_signature, exclude_repeated_candidates
 from trajflow_kv.state_router import routed_action_type, router_features
@@ -51,6 +53,15 @@ def test_projector_merge_matches_hooked_linear_output():
     merged = merge_projectors_into_model(model, bundle)
     assert list(merged) == ["v_proj.weight", "v_proj.bias"]
     assert torch.allclose(model(value), hooked, atol=1e-5, rtol=1e-5)
+
+
+def test_rank_expansion_preserves_effective_residual():
+    down = torch.randn(3, 8)
+    up = torch.randn(8, 3)
+    new_down, new_up = resize_low_rank_factors(down, up, 6.0, 5, 10.0)
+    original = (6.0 / 3) * up @ down
+    expanded = (10.0 / 5) * new_up @ new_down
+    assert torch.allclose(expanded, original, atol=1e-4, rtol=1e-4)
 
 
 def test_return_objective():
