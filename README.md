@@ -76,6 +76,13 @@ merged student have identical held-out Top-1 (`0.5`), MRR (`0.6722`), and
 type-conditioned Top-1/MRR (`0.8333/0.8889`); return margin is `0.3767` versus
 `0.3836`, with the small difference attributable to bf16 merge rounding.
 
+The K/V ablation is not one-sided. At 10 return-training epochs, K-only moves
+held-out margin from `0.1818` to `0.2369` (`+0.0550`), while V-only moves from
+`0.1835` to `0.2209` (`+0.0373`). After fork/coordinate shaping, however,
+K reaches margin/MRR `0.2818/0.6389` whereas V reaches
+`0.3767/0.6722`. This suggests K is stronger for coarse trajectory
+separation and V for concrete action/coordinate shaping.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash

@@ -101,6 +101,19 @@
     "merged_student": {"return_margin": 0.3836079829, "top1": 0.5, "mrr": 0.6722222222, "type_conditioned_top1": 0.8333333333, "type_conditioned_mrr": 0.8888888889},
     "decision": "Go. Ranking metrics are identical without hooks; the small bf16 margin difference is positive."
   },
+  "k_vs_v_ablation": {
+    "k_initial_margin": 0.1818198454,
+    "k_return_epoch_10_margin": 0.2368525110,
+    "k_return_delta": 0.0550326656,
+    "v_initial_margin": 0.1835253235,
+    "v_return_epoch_10_margin": 0.2208706249,
+    "v_return_delta": 0.0373453014,
+    "k_after_fork_margin": 0.2818318635,
+    "k_after_fork_mrr": 0.6388888889,
+    "v_after_fork_coordinate_margin": 0.3766525348,
+    "v_after_fork_coordinate_mrr": 0.6722222222,
+    "interpretation": "K learns the larger pure-return separation increment, while V responds more strongly to state/fork/coordinate preference shaping."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",
