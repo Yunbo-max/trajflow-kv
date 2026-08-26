@@ -121,6 +121,15 @@
     "rank_16": {"return_margin": 0.2129268866, "mean_transport_energy": 0.0000365378, "top1": 0.5, "mrr": 0.6210317460, "mean_correct_margin": -0.2125677976},
     "interpretation": "Rank 8 gives the strongest return separation; rank 16 is saturated on the current sample, and rank 4 is the lower-energy budget option."
   },
+  "aitw_cross_dataset_retention": {
+    "trajectories": 16,
+    "metric": "overall teacher-forced mean action-token log-probability",
+    "warm_start": -5.9998406470,
+    "androidworld_return_epoch_10": -6.0107172430,
+    "low_energy_lambda_3000": -6.0237765014,
+    "fork_coordinate_checkpoint": -6.1119962037,
+    "interpretation": "Pure return training causes only a 0.18% relative log-prob degradation. Strong fork/coordinate shaping costs about 1.87%. The low-energy setting reduces transport energy but does not outperform unregularized return training on AITW retention."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",

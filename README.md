@@ -89,6 +89,14 @@ comparable. At 10 epochs, ranks `4/8/16` obtain return margins
 return separation, rank 16 is already saturated on 41 trajectories, and rank
 4 is a reasonable lower-energy budget point.
 
+As a cross-dataset retention check, 16 AITW trajectories have mean action
+log-prob `-5.9998` at warm-start, `-6.0107` after AndroidWorld return training,
+`-6.0238` with the `lambda_energy=3000` checkpoint, and `-6.1120` after the
+strongest fork/coordinate shaping. Pure return training therefore changes the
+AITW metric by only about `0.18%`; fork shaping costs about `1.87%`. The
+low-energy checkpoint lowers activation energy but does not beat unregularized
+return training on this retention metric.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash

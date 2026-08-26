@@ -27,6 +27,7 @@ def main() -> None:
     parser.add_argument("--target", choices=("k", "v", "both"), default="both")
     parser.add_argument("--last-n-layers", type=int)
     parser.add_argument("--max-pixels", type=int, default=200704)
+    parser.add_argument("--allow-single-return", action="store_true")
     args = parser.parse_args()
 
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
@@ -97,7 +98,7 @@ def main() -> None:
 
     positive = [row["mean_token_logprob"] for row in rows if row["return"] > 0]
     negative = [row["mean_token_logprob"] for row in rows if row["return"] <= 0]
-    if not positive or not negative:
+    if (not positive or not negative) and not args.allow_single_return:
         raise ValueError("return-margin evaluation requires successes and failures")
     summary = {
         "checkpoint": args.checkpoint or args.merged_checkpoint,
@@ -105,9 +106,15 @@ def main() -> None:
         "trajectories": len(rows),
         "positive_count": len(positive),
         "negative_count": len(negative),
-        "positive_mean_token_logprob": sum(positive) / len(positive),
-        "negative_mean_token_logprob": sum(negative) / len(negative),
-        "return_margin": sum(positive) / len(positive) - sum(negative) / len(negative),
+        "overall_mean_token_logprob": sum(
+            row["mean_token_logprob"] for row in rows
+        ) / len(rows),
+        "positive_mean_token_logprob": sum(positive) / len(positive) if positive else None,
+        "negative_mean_token_logprob": sum(negative) / len(negative) if negative else None,
+        "return_margin": (
+            sum(positive) / len(positive) - sum(negative) / len(negative)
+            if positive and negative else None
+        ),
         "mean_transport_energy": (
             sum(row["mean_transport_energy"] for row in rows) / len(rows)
             if bundle is not None else None
