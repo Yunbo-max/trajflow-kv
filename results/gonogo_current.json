@@ -37,9 +37,18 @@
     "shuffled_return_epoch_20": {"top1": 0.5, "mrr": 0.6210317460, "margin": -0.2358597300},
     "successful_action_ce_epoch_20": {"top1": 0.5, "mrr": 0.6210317460, "margin": -0.2009545847}
   },
+  "positive_only_action_auxiliary": {
+    "lambda": 0.01,
+    "epochs": 20,
+    "return_margin": 0.2601817833,
+    "top1": 0.5,
+    "mrr": 0.6349206349,
+    "mean_correct_margin": -0.1718801452,
+    "interpretation": "Best joint offline result: preserves return separation and improves ranking, but does not change top-1 decisions."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
-    "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations.",
+    "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",
     "candidate_ranking": "All tested deterministic Wi-Fi rollouts repeatedly selected swipe-down and failed.",
     "go_no_go": "Do not claim end-to-end method success or start full flow/critic scaling yet. First solve structured action selection and demonstrate paired online gains."
   }

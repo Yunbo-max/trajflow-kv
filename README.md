@@ -20,6 +20,12 @@ CE reached `0.1874`. However, learned free-form rollouts still achieved no
 success on the tested Wi-Fi/Bluetooth system tasks. The exact snapshot is in
 [`results/gonogo_current.json`](results/gonogo_current.json).
 
+A follow-up with positive-trajectory-only action CE (`lambda=0.01`) retained
+the return margin (`0.2602`) and improved MRR from `0.6250` to `0.6349`, but
+Top-1 stayed at `0.5`; its online Wi-Fi rollout emitted legal actions yet
+repeated the same swipe for all eight steps and failed. This narrows the next
+problem to state-conditioned/fork-point action selection rather than syntax.
+
 This supports the return-conditioned trajectory-separation mechanism, but it
 does not yet support scaling to flow/critic experiments. The next gate is a
 paired online gain with legal structured actions.
