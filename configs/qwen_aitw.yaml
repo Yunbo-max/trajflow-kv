@@ -13,4 +13,5 @@ data_path: data/aitw/train.jsonl
 output_dir: outputs/qwen-aitw
 max_pixels: 401408
 gradient_accumulation_steps: 8
+max_trajectories: 1  # smoke test; raise after checking GPU memory
 toy: false

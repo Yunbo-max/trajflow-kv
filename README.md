@@ -34,15 +34,23 @@ python3 -m venv .venv
 ## Real model and data
 
 ```bash
-./scripts/download_model.sh
-./scripts/download_aitw_sample.sh 1000
 .venv/bin/pip install -e '.[train]'
+./scripts/setup_cuda126.sh
+./scripts/download_model.sh
+./scripts/download_aitw_sample.sh 16
 .venv/bin/python -m trajflow_kv.train --config configs/qwen_aitw.yaml
 ```
 
 The Qwen run requires substantially more memory than the toy test. On a 16GB
 GPU use batch size 1, gradient accumulation, gradient checkpointing and a
 small image pixel budget. The backbone is frozen; only projectors train.
+`max_trajectories: 1` is the committed real-model smoke-test default; increase
+it only after observing peak GPU memory on your machine.
+
+Verified on an RTX A4000 (16GB): 16 viewer examples use 9.28 GiB peak allocated
+GPU memory, hook all 72 K/V projections across 36 language layers, and train
+294,912 projector parameters. Run the verified batch with
+`--max-trajectories 16`.
 
 ## Trajectory JSONL schema
 

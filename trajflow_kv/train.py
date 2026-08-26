@@ -63,7 +63,7 @@ def train_qwen(cfg):
     device = cfg["device"]
     processor = AutoProcessor.from_pretrained(cfg["model_path"], max_pixels=cfg["max_pixels"])
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        cfg["model_path"], torch_dtype=torch.bfloat16, device_map=device
+        cfg["model_path"], dtype=torch.bfloat16, device_map=device
     )
     for parameter in model.parameters():
         parameter.requires_grad_(False)
@@ -71,9 +71,18 @@ def train_qwen(cfg):
     bundle = attach_kv_projectors(model, cfg["rank"], cfg["alpha"], cfg["target"])
     optimizer = torch.optim.AdamW(bundle.modules.parameters(), lr=cfg["lr"])
     trajectories = load_jsonl(cfg["data_path"])
+    trajectories = trajectories[: cfg.get("max_trajectories", len(trajectories))]
 
     # Teacher-forced action log probabilities retain gradient through hooked K/V.
-    history = []
+    history = [{
+        "event": "setup",
+        "hooked_modules": len(bundle.names),
+        "trainable_parameters": sum(p.numel() for p in bundle.modules.parameters()),
+        "first_hook": bundle.names[0],
+        "last_hook": bundle.names[-1],
+    }]
+    if device.startswith("cuda"):
+        torch.cuda.reset_peak_memory_stats()
     for epoch in range(cfg["epochs"]):
         returns = torch.tensor([float(t["return"]) for t in trajectories], device=device)
         advantages = normalized_advantages(returns, [t["task_id"] for t in trajectories])
@@ -87,13 +96,21 @@ def train_qwen(cfg):
                 prompt = f"Task: {trajectory['instruction']}\nHistory: {json.dumps(step.get('history', []))}\nEmit one JSON action."
                 content.append({"type": "text", "text": prompt})
                 messages = [{"role": "user", "content": content},
-                            {"role": "assistant", "content": step["action"]}]
+                            {"role": "assistant", "content": [
+                                {"type": "text", "text": step["action"]}
+                            ]}]
+                prompt_messages = messages[:1]
+                prompt_batch = processor.apply_chat_template(
+                    prompt_messages, tokenize=True, add_generation_prompt=True,
+                    return_dict=True, return_tensors="pt"
+                )
                 batch = processor.apply_chat_template(messages, tokenize=True, return_dict=True,
                                                        return_tensors="pt").to(device)
                 labels = batch["input_ids"].clone()
-                # Minimal robust masking: supervise only final action token span.
-                action_ids = processor.tokenizer(step["action"], add_special_tokens=False)["input_ids"]
-                labels[:, :-len(action_ids)] = -100
+                # Supervise the complete assistant span, including the action;
+                # final-N masking is wrong because chat templates add EOS tokens.
+                prompt_tokens = prompt_batch["input_ids"].shape[1]
+                labels[:, :prompt_tokens] = -100
                 output = model(**batch, labels=labels)
                 valid = (labels != -100).sum().clamp_min(1)
                 trajectory_logprob = trajectory_logprob - output.loss * valid
@@ -105,15 +122,21 @@ def train_qwen(cfg):
             (loss / cfg["gradient_accumulation_steps"]).backward()
             if (index + 1) % cfg["gradient_accumulation_steps"] == 0 or index + 1 == len(trajectories):
                 optimizer.step(); optimizer.zero_grad(set_to_none=True)
-            history.append({"epoch": epoch, "trajectory": index, "loss": float(loss.detach())})
+            metric = {"epoch": epoch, "trajectory": index, "loss": float(loss.detach())}
+            if device.startswith("cuda"):
+                metric["peak_gpu_gib"] = torch.cuda.max_memory_allocated() / 2**30
+            history.append(metric)
     return model, bundle, history
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument("--max-trajectories", type=int)
     args = parser.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text())
+    if args.max_trajectories is not None:
+        cfg["max_trajectories"] = args.max_trajectories
     random.seed(cfg["seed"]); torch.manual_seed(cfg["seed"])
     model, bundle, history = train_toy(cfg) if cfg["toy"] else train_qwen(cfg)
     output = Path(cfg["output_dir"]); output.mkdir(parents=True, exist_ok=True)
