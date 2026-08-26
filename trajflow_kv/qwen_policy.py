@@ -182,7 +182,9 @@ class QwenKVPolicy:
                     pass
             try:
                 if self.state_router is not None:
-                    proposed_type = self.state_router.predict(image, len(history))
+                    proposed_type = self.state_router.predict(
+                        image, len(history), instruction
+                    )
                 else:
                     proposal = self._generate(instruction, image, history, screen_size)
                     proposed_type = parse_action(proposal, screen_size)["action_type"]

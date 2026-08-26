@@ -23,7 +23,9 @@ def examples(path: str, task_prefix: str | None) -> list[tuple[torch.Tensor, str
             label = routed_action_type(step["action"])
             if label and step.get("image"):
                 image = Image.open(step["image"]).convert("RGB")
-                rows.append((router_features(image, len(step.get("history", []))), label))
+                rows.append((router_features(
+                    image, len(step.get("history", [])), trajectory["instruction"]
+                ), label))
     return rows
 
 

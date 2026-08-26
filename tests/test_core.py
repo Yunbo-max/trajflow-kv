@@ -103,7 +103,7 @@ def test_exact_candidate_loop_guard_keeps_other_click_coordinates():
 
 def test_state_router_features_and_labels():
     from PIL import Image
-    features = router_features(Image.new("RGB", (40, 80), "white"), 3)
-    assert features.shape == (24 * 24 * 3 + 1,)
+    features = router_features(Image.new("RGB", (40, 80), "white"), 3, "turn wifi off")
+    assert features.shape == (64 * 64 * 3 + 1 + 32,)
     assert routed_action_type('{"action_type":"swipe","direction":"down"}') == "pan"
     assert routed_action_type('{"action_type":"click","x":1,"y":2}') == "click"

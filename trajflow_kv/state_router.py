@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -18,10 +19,22 @@ def routed_action_type(action: str) -> str | None:
     return None
 
 
-def router_features(image: Image.Image, history_length: int, size: int = 24) -> torch.Tensor:
+def router_features(
+    image: Image.Image, history_length: int, instruction: str = "", size: int = 64,
+    text_bins: int = 32,
+) -> torch.Tensor:
     pixels = np.asarray(image.convert("RGB").resize((size, size)), dtype=np.float32) / 255.0
     flat = torch.from_numpy(pixels).flatten()
-    return torch.cat([flat, torch.tensor([min(history_length, 20) / 20.0])])
+    text = torch.zeros(text_bins)
+    for token in instruction.lower().replace("-", " ").split():
+        digest = hashlib.sha256(token.encode()).digest()
+        text[int.from_bytes(digest[:2], "little") % text_bins] += (
+            1.0 if digest[2] % 2 else -1.0
+        )
+    norm = text.norm()
+    if norm > 0:
+        text /= norm
+    return torch.cat([flat, torch.tensor([min(history_length, 20) / 20.0]), text])
 
 
 class StateRouter(nn.Module):
@@ -35,8 +48,8 @@ class StateRouter(nn.Module):
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         return self.network(features)
 
-    def predict(self, image: Image.Image, history_length: int) -> str:
-        features = router_features(image, history_length).to(next(self.parameters()).device)
+    def predict(self, image: Image.Image, history_length: int, instruction: str = "") -> str:
+        features = router_features(image, history_length, instruction).to(next(self.parameters()).device)
         with torch.inference_mode():
             index = int(self(features.unsqueeze(0)).argmax(-1))
         return self.classes[index]
