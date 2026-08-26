@@ -92,6 +92,13 @@ def train_qwen(cfg):
         torch.cuda.reset_peak_memory_stats()
     for epoch in range(cfg["epochs"]):
         returns = torch.tensor([float(t["return"]) for t in trajectories], device=device)
+        return_mode = cfg.get("return_mode", "observed")
+        if return_mode == "shuffle":
+            returns = returns[torch.randperm(len(returns), device=device)]
+        elif return_mode == "zero":
+            returns = torch.zeros_like(returns)
+        elif return_mode != "observed":
+            raise ValueError(f"unsupported return_mode: {return_mode}")
         advantages = normalized_advantages(returns, [t["task_id"] for t in trajectories])
         if cfg.get("lambda_action", 0.0) == 0 and torch.count_nonzero(advantages) == 0:
             raise ValueError(
@@ -154,6 +161,11 @@ def main():
     parser.add_argument("--data-path")
     parser.add_argument("--output-dir")
     parser.add_argument("--projector-checkpoint")
+    parser.add_argument("--return-mode", choices=("observed", "shuffle", "zero"))
+    parser.add_argument("--lambda-action", type=float)
+    parser.add_argument("--lambda-energy", type=float)
+    parser.add_argument("--lambda-orth", type=float)
+    parser.add_argument("--epochs", type=int)
     args = parser.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text())
     if args.max_trajectories is not None:
@@ -164,6 +176,10 @@ def main():
         cfg["output_dir"] = args.output_dir
     if args.projector_checkpoint is not None:
         cfg["projector_checkpoint"] = args.projector_checkpoint
+    for key in ("return_mode", "lambda_action", "lambda_energy", "lambda_orth", "epochs"):
+        value = getattr(args, key)
+        if value is not None:
+            cfg[key] = value
     random.seed(cfg["seed"]); torch.manual_seed(cfg["seed"])
     model, bundle, history = train_toy(cfg) if cfg["toy"] else train_qwen(cfg)
     output = Path(cfg["output_dir"]); output.mkdir(parents=True, exist_ok=True)

@@ -64,12 +64,27 @@ def parse_action(text: str, screen_size: tuple[int, int]) -> dict[str, Any]:
         raw["goal_status"] = (
             "complete" if status in {"success", "complete", "done"} else "infeasible"
         )
+    if raw.get("action_type") == "system_button":
+        button = str(raw.pop("button", "")).lower()
+        system_aliases = {"home": "navigate_home", "back": "navigate_back"}
+        if button in system_aliases:
+            raw["action_type"] = system_aliases[button]
+    if "coordinate1" in raw:
+        raw["coordinate_1"] = raw.pop("coordinate1")
+    if "coordinate2" in raw:
+        raw["coordinate_2"] = raw.pop("coordinate2")
+        if "coordinate" in raw and "coordinate_1" not in raw:
+            raw["coordinate_1"] = raw.pop("coordinate")
     # Qwen/AITW commonly emits point or two-point coordinate fields. Convert
     # those at the environment boundary to AndroidWorld's JSONAction schema.
     if "coordinate" in raw and isinstance(raw["coordinate"], list) and len(raw["coordinate"]) == 2:
         raw["x"], raw["y"] = raw.pop("coordinate")
     if "coordinate_1" in raw and "coordinate_2" in raw:
         start, end = raw.pop("coordinate_1"), raw.pop("coordinate_2")
+        if isinstance(start, list) and start and isinstance(start[0], list):
+            start = start[0]
+        if isinstance(end, list) and end and isinstance(end[0], list):
+            end = end[0]
         if raw.get("action_type") != "swipe" or len(start) != 2 or len(end) != 2:
             raise InvalidAction("two-point coordinates are only valid for swipe")
         dx, dy = end[0] - start[0], end[1] - start[1]

@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Measure successful-vs-failed trajectory log-prob margin for a KV checkpoint."""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import torch
+from PIL import Image
+
+from trajflow_kv.data import load_jsonl
+from trajflow_kv.projector import attach_kv_projectors
+from trajflow_kv.qwen_policy import build_action_prompt
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="models/Qwen2.5-VL-3B-Instruct")
+    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--rank", type=int, default=8)
+    parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument("--target", choices=("k", "v", "both"), default="both")
+    parser.add_argument("--max-pixels", type=int, default=200704)
+    args = parser.parse_args()
+
+    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+
+    processor = AutoProcessor.from_pretrained(args.model, max_pixels=args.max_pixels)
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        args.model, dtype=torch.bfloat16, device_map="cuda"
+    ).eval()
+    bundle = attach_kv_projectors(model, args.rank, args.alpha, args.target)
+    bundle.modules.load_state_dict(
+        torch.load(args.checkpoint, map_location="cuda", weights_only=True)
+    )
+
+    rows = []
+    with torch.inference_mode():
+        for trajectory_index, trajectory in enumerate(load_jsonl(args.data)):
+            logprob_sum, token_count = 0.0, 0
+            for step in trajectory["steps"]:
+                content = []
+                loaded_image = None
+                if step.get("image"):
+                    loaded_image = Image.open(step["image"]).convert("RGB")
+                    content.append({"type": "image", "image": loaded_image})
+                inferred_size = (
+                    loaded_image.size
+                    if loaded_image else tuple(step.get("screen_size", (1000, 1000)))
+                )
+                content.append({"type": "text", "text": build_action_prompt(
+                    trajectory["instruction"], step.get("history", []), inferred_size
+                )})
+                prompt_messages = [{"role": "user", "content": content}]
+                messages = prompt_messages + [{"role": "assistant", "content": [
+                    {"type": "text", "text": step["action"]}
+                ]}]
+                prompt_batch = processor.apply_chat_template(
+                    prompt_messages, tokenize=True, add_generation_prompt=True,
+                    return_dict=True, return_tensors="pt",
+                )
+                batch = processor.apply_chat_template(
+                    messages, tokenize=True, return_dict=True, return_tensors="pt"
+                ).to("cuda")
+                labels = batch["input_ids"].clone()
+                labels[:, :prompt_batch["input_ids"].shape[1]] = -100
+                output = model(**batch, labels=labels)
+                valid = int((labels != -100).sum())
+                logprob_sum += -float(output.loss) * valid
+                token_count += valid
+            rows.append({
+                "trajectory": trajectory_index,
+                "task_id": trajectory["task_id"],
+                "return": float(trajectory["return"]),
+                "tokens": token_count,
+                "mean_token_logprob": logprob_sum / max(token_count, 1),
+            })
+
+    positive = [row["mean_token_logprob"] for row in rows if row["return"] > 0]
+    negative = [row["mean_token_logprob"] for row in rows if row["return"] <= 0]
+    if not positive or not negative:
+        raise ValueError("return-margin evaluation requires successes and failures")
+    summary = {
+        "checkpoint": args.checkpoint,
+        "data": args.data,
+        "trajectories": len(rows),
+        "positive_count": len(positive),
+        "negative_count": len(negative),
+        "positive_mean_token_logprob": sum(positive) / len(positive),
+        "negative_mean_token_logprob": sum(negative) / len(negative),
+        "return_margin": sum(positive) / len(positive) - sum(negative) / len(negative),
+        "rows": rows,
+    }
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({key: value for key, value in summary.items() if key != "rows"}, indent=2))
+
+
+if __name__ == "__main__":
+    main()

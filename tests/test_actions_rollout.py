@@ -51,6 +51,16 @@ def test_action_parser_repairs_bare_key_and_terminate_alias():
     ) == {"action_type": "status", "goal_status": "complete"}
 
 
+def test_action_parser_normalizes_common_android_aliases():
+    assert parse_action(
+        '{"action_type":"swipe","coordinate":[10,90],"coordinate2":[10,20]}',
+        (100, 100),
+    ) == {"action_type": "swipe", "direction": "up"}
+    assert parse_action(
+        '{"action_type":"system_button","button":"Home"}', (100, 100)
+    ) == {"action_type": "navigate_home"}
+
+
 def test_mixed_return_rollout_schema(tmp_path):
     executed = []
     policy = SequencePolicy(["not json", '{"action_type":"status","goal_status":"complete"}'])

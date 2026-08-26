@@ -1,0 +1,28 @@
+{
+  "status": "provisional_no_go",
+  "reason": "The candidate has a small in-domain gain, but only one discordant online pair and zero success on both unseen system tasks.",
+  "offline_return_margin": {
+    "splits": [17, 23, 31],
+    "initial": [1.5423460454, 0.9596502, 0.9983119],
+    "return_no_energy": [1.5552779238, 0.9507319, 1.0064783],
+    "random_no_energy": [1.5292873, 0.9506620, 1.0181458],
+    "mean_delta_return_vs_initial": 0.0040607,
+    "mean_delta_random_vs_initial": -0.0007376
+  },
+  "online_paired": {
+    "pairs": 16,
+    "baseline_successes": 6,
+    "candidate_successes": 7,
+    "baseline_success_rate": 0.375,
+    "candidate_success_rate": 0.4375,
+    "improved_pairs": 1,
+    "regressed_pairs": 0,
+    "unchanged_pairs": 15,
+    "tasks": {
+      "OpenAppTaskEval": {"pairs": 10, "baseline": 6, "candidate": 7},
+      "SystemBluetoothTurnOn": {"pairs": 3, "baseline": 0, "candidate": 0},
+      "SystemWifiTurnOff": {"pairs": 3, "baseline": 0, "candidate": 0}
+    }
+  },
+  "next_gate": "Collect real successful system-task trajectories, retrain a multi-task projector, and repeat paired multi-seed evaluation before adding flow or critic components."
+}
