@@ -78,3 +78,45 @@ would yield zero centered advantage and is intentionally avoided.
   than the multi-million-step corpus.
 - Never commit Hugging Face or GitHub tokens. `.env`, model files, datasets,
   checkpoints and logs are ignored.
+
+## AndroidWorld mixed-return loop
+
+AndroidWorld's official Docker image exposes a FastAPI server on port 5000.
+It can run on the same host or a separate emulator host; this repository only
+needs HTTP access to it. Collect repeated stochastic rollouts for one fixed
+task instance so the task-group baseline is meaningful:
+
+```bash
+.venv/bin/python scripts/collect_androidworld.py \
+  --server-url http://ANDROID_HOST:5000 \
+  --task ContactsAddContact --task-index 0 \
+  --rollouts 8 --temperature 0.7
+
+.venv/bin/python scripts/validate_rollouts.py data/androidworld/rollouts.jsonl
+.venv/bin/python -m trajflow_kv.train --config configs/qwen_androidworld.yaml
+```
+
+The collector uses the official `/screenshot`, `/execute_action`, task
+initialize/tear-down, goal, and score endpoints. Screenshots and canonical
+actions are saved per step. Invalid model JSON becomes a recorded `wait`
+action rather than crashing or silently dropping the trajectory. AITW-style
+point coordinates and two-point swipes are converted to AndroidWorld's action
+schema at this boundary.
+
+Pure return training (`lambda_action: 0`) refuses to run if every task group
+has constant return. This prevents an all-success or all-failure batch from
+silently producing zero centered policy-gradient signal. The AndroidWorld
+config loads the AITW projector checkpoint before applying return updates.
+
+To exercise the exact return path without an emulator, create a small mixed
+fixture from the downloaded sample:
+
+```bash
+.venv/bin/python scripts/make_mixed_return_smoke.py \
+  data/aitw/train.jsonl /tmp/trajflow-mixed.jsonl
+.venv/bin/python scripts/validate_rollouts.py /tmp/trajflow-mixed.jsonl
+.venv/bin/python -m trajflow_kv.train \
+  --config configs/qwen_androidworld.yaml \
+  --data-path /tmp/trajflow-mixed.jsonl \
+  --output-dir /tmp/trajflow-return-smoke
+```

@@ -1,0 +1,50 @@
+import json
+
+import numpy as np
+
+from trajflow_kv.actions import InvalidAction, parse_action
+from trajflow_kv.rollout import collect_rollout
+
+
+class SequencePolicy:
+    def __init__(self, outputs): self.outputs = iter(outputs)
+    def act(self, instruction, image, history, screen_size): return next(self.outputs)
+
+
+def test_action_parser_normalizes_coordinates_and_fences():
+    action = parse_action('```json\n{"action_type":"click","x":0.5,"y":0.25}\n```', (100, 200))
+    assert action == {"action_type": "click", "x": 50, "y": 50}
+
+
+def test_action_parser_rejects_invalid_scroll():
+    try:
+        parse_action('{"action_type":"scroll","direction":"diagonal"}', (100, 200))
+    except InvalidAction:
+        pass
+    else:
+        raise AssertionError("invalid direction accepted")
+
+
+def test_aitw_two_point_swipe_converts_to_androidworld_direction():
+    action = parse_action(
+        '{"action_type":"swipe","coordinate_1":[256,598],"coordinate_2":[256,250]}',
+        (512, 768),
+    )
+    assert action == {"action_type": "swipe", "direction": "up"}
+
+
+def test_mixed_return_rollout_schema(tmp_path):
+    executed = []
+    policy = SequencePolicy(["not json", '{"action_type":"status","goal_status":"complete"}'])
+    result = collect_rollout(
+        policy=policy, instruction="demo", task_id="task-a", max_steps=4,
+        image_dir=tmp_path / "images",
+        get_pixels=lambda: np.zeros((20, 10, 3), dtype=np.uint8),
+        screen_size=lambda: (10, 20), execute=executed.append,
+        evaluate=lambda: 1.0,
+    )
+    record = result.as_record()
+    assert record["return"] == 1.0 and len(record["steps"]) == 2
+    assert record["metadata"]["invalid_actions"] == 1
+    assert executed[0] == {"action_type": "wait"}
+    assert json.loads(record["steps"][1]["action"])["action_type"] == "status"

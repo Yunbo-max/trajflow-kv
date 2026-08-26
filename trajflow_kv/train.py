@@ -59,6 +59,7 @@ def train_toy(cfg):
 def train_qwen(cfg):
     from PIL import Image
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    from .qwen_policy import build_action_prompt
 
     device = cfg["device"]
     processor = AutoProcessor.from_pretrained(cfg["model_path"], max_pixels=cfg["max_pixels"])
@@ -69,6 +70,11 @@ def train_qwen(cfg):
         parameter.requires_grad_(False)
     model.gradient_checkpointing_enable()
     bundle = attach_kv_projectors(model, cfg["rank"], cfg["alpha"], cfg["target"])
+    projector_checkpoint = cfg.get("projector_checkpoint")
+    if projector_checkpoint:
+        bundle.modules.load_state_dict(
+            torch.load(projector_checkpoint, map_location=device, weights_only=True)
+        )
     optimizer = torch.optim.AdamW(bundle.modules.parameters(), lr=cfg["lr"])
     trajectories = load_jsonl(cfg["data_path"])
     trajectories = trajectories[: cfg.get("max_trajectories", len(trajectories))]
@@ -80,20 +86,31 @@ def train_qwen(cfg):
         "trainable_parameters": sum(p.numel() for p in bundle.modules.parameters()),
         "first_hook": bundle.names[0],
         "last_hook": bundle.names[-1],
+        "projector_checkpoint": projector_checkpoint,
     }]
     if device.startswith("cuda"):
         torch.cuda.reset_peak_memory_stats()
     for epoch in range(cfg["epochs"]):
         returns = torch.tensor([float(t["return"]) for t in trajectories], device=device)
         advantages = normalized_advantages(returns, [t["task_id"] for t in trajectories])
+        if cfg.get("lambda_action", 0.0) == 0 and torch.count_nonzero(advantages) == 0:
+            raise ValueError(
+                "pure return training has zero advantages; collect mixed returns "
+                "for at least one repeated task or set lambda_action > 0 for imitation"
+            )
         optimizer.zero_grad(set_to_none=True)
         for index, trajectory in enumerate(trajectories):
             trajectory_logprob = torch.zeros((), device=device)
             for step in trajectory["steps"]:
                 content = []
+                loaded_image = None
                 if step.get("image"):
-                    content.append({"type": "image", "image": Image.open(step["image"]).convert("RGB")})
-                prompt = f"Task: {trajectory['instruction']}\nHistory: {json.dumps(step.get('history', []))}\nEmit one JSON action."
+                    loaded_image = Image.open(step["image"]).convert("RGB")
+                    content.append({"type": "image", "image": loaded_image})
+                inferred_size = loaded_image.size if loaded_image else tuple(step.get("screen_size", (1000, 1000)))
+                prompt = build_action_prompt(
+                    trajectory["instruction"], step.get("history", []), inferred_size
+                )
                 content.append({"type": "text", "text": prompt})
                 messages = [{"role": "user", "content": content},
                             {"role": "assistant", "content": [
@@ -122,7 +139,8 @@ def train_qwen(cfg):
             (loss / cfg["gradient_accumulation_steps"]).backward()
             if (index + 1) % cfg["gradient_accumulation_steps"] == 0 or index + 1 == len(trajectories):
                 optimizer.step(); optimizer.zero_grad(set_to_none=True)
-            metric = {"epoch": epoch, "trajectory": index, "loss": float(loss.detach())}
+            metric = {"epoch": epoch, "trajectory": index, "loss": float(loss.detach()),
+                      "return": float(returns[index]), "advantage": float(advantages[index])}
             if device.startswith("cuda"):
                 metric["peak_gpu_gib"] = torch.cuda.max_memory_allocated() / 2**30
             history.append(metric)
@@ -133,10 +151,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--max-trajectories", type=int)
+    parser.add_argument("--data-path")
+    parser.add_argument("--output-dir")
     args = parser.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text())
     if args.max_trajectories is not None:
         cfg["max_trajectories"] = args.max_trajectories
+    if args.data_path is not None:
+        cfg["data_path"] = args.data_path
+    if args.output_dir is not None:
+        cfg["output_dir"] = args.output_dir
     random.seed(cfg["seed"]); torch.manual_seed(cfg["seed"])
     model, bundle, history = train_toy(cfg) if cfg["toy"] else train_qwen(cfg)
     output = Path(cfg["output_dir"]); output.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "trajflow-kv"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["torch>=2.2", "numpy>=1.26", "pyyaml>=6", "pillow>=10"]
+dependencies = ["torch>=2.2", "numpy>=1.26", "pyyaml>=6", "pillow>=10", "requests>=2.31"]
 
 [project.optional-dependencies]
 train = [

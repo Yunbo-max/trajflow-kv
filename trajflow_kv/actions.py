@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+
+ACTION_TYPES = {
+    "click", "double_tap", "input_text", "keyboard_enter", "long_press",
+    "navigate_back", "navigate_home", "open_app", "scroll", "swipe",
+    "status", "wait", "answer",
+}
+DIRECTIONS = {"left", "right", "down", "up"}
+ALLOWED_KEYS = {
+    "action_type", "index", "x", "y", "text", "direction", "app_name",
+    "goal_status", "keycode", "clear_text",
+}
+
+
+class InvalidAction(ValueError):
+    pass
+
+
+def _extract_json(text: str) -> dict[str, Any]:
+    text = text.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S | re.I)
+    candidate = fenced.group(1) if fenced else text
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise InvalidAction("model output contains no JSON object")
+        try:
+            value = json.loads(text[start:end + 1])
+        except json.JSONDecodeError as error:
+            raise InvalidAction(f"invalid action JSON: {error.msg}") from error
+    if not isinstance(value, dict):
+        raise InvalidAction("action must be a JSON object")
+    return value
+
+
+def parse_action(text: str, screen_size: tuple[int, int]) -> dict[str, Any]:
+    """Parse and validate model output against AndroidWorld JSONAction."""
+    raw = _extract_json(text)
+    # Qwen/AITW commonly emits point or two-point coordinate fields. Convert
+    # those at the environment boundary to AndroidWorld's JSONAction schema.
+    if "coordinate" in raw and isinstance(raw["coordinate"], list) and len(raw["coordinate"]) == 2:
+        raw["x"], raw["y"] = raw.pop("coordinate")
+    if "coordinate_1" in raw and "coordinate_2" in raw:
+        start, end = raw.pop("coordinate_1"), raw.pop("coordinate_2")
+        if raw.get("action_type") != "swipe" or len(start) != 2 or len(end) != 2:
+            raise InvalidAction("two-point coordinates are only valid for swipe")
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        raw["direction"] = ("right" if dx > 0 else "left") if abs(dx) > abs(dy) else ("down" if dy > 0 else "up")
+    unknown = set(raw) - ALLOWED_KEYS
+    if unknown:
+        raise InvalidAction(f"unknown action keys: {sorted(unknown)}")
+    action_type = raw.get("action_type")
+    if action_type not in ACTION_TYPES:
+        raise InvalidAction(f"unsupported action_type: {action_type!r}")
+    width, height = screen_size
+    if action_type in {"click", "double_tap", "long_press"} and "index" not in raw:
+        if not all(key in raw for key in ("x", "y")):
+            raise InvalidAction(f"{action_type} requires index or x/y")
+    for key, limit in (("x", width), ("y", height)):
+        if key in raw:
+            if isinstance(raw[key], bool) or not isinstance(raw[key], (int, float)):
+                raise InvalidAction(f"{key} must be numeric")
+            # Accept normalized coordinates, but serialize absolute integer pixels.
+            value = raw[key] * limit if isinstance(raw[key], float) and 0 <= raw[key] <= 1 else raw[key]
+            raw[key] = min(max(int(round(value)), 0), limit - 1)
+    if "index" in raw:
+        raw["index"] = int(raw["index"])
+    if action_type in {"scroll", "swipe"} and raw.get("direction") not in DIRECTIONS:
+        raise InvalidAction(f"{action_type} requires direction: left/right/down/up")
+    if action_type == "input_text" and not isinstance(raw.get("text"), str):
+        raise InvalidAction("input_text requires string text")
+    return raw
+
+
+def canonical_action(action: dict[str, Any]) -> str:
+    return json.dumps(action, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
