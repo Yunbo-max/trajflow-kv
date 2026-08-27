@@ -95,7 +95,35 @@ def train_qwen(cfg):
         bundle.modules.load_state_dict(
             torch.load(projector_checkpoint, map_location=device, weights_only=True)
         )
-    optimizer = torch.optim.AdamW(bundle.modules.parameters(), lr=cfg["lr"])
+    if cfg.get("gate_only") and cfg.get("freeze_gate"):
+        raise ValueError("gate_only and freeze_gate are mutually exclusive")
+    if cfg.get("state_conditioned_gate"):
+        for name, parameter in bundle.modules.named_parameters():
+            is_gate = any(part in name for part in ("query_gate", "memory_gate", "gate_bias"))
+            if cfg.get("gate_only") and not is_gate:
+                parameter.requires_grad_(False)
+            if cfg.get("freeze_gate") and is_gate:
+                parameter.requires_grad_(False)
+    if cfg.get("state_conditioned_gate") and cfg.get("gate_lr") is not None:
+        gate_parameters, transport_parameters = [], []
+        for name, parameter in bundle.modules.named_parameters():
+            if not parameter.requires_grad:
+                continue
+            if any(part in name for part in ("query_gate", "memory_gate", "gate_bias")):
+                gate_parameters.append(parameter)
+            else:
+                transport_parameters.append(parameter)
+        parameter_groups = []
+        if transport_parameters:
+            parameter_groups.append({"params": transport_parameters, "lr": float(cfg["lr"])})
+        if gate_parameters:
+            parameter_groups.append({"params": gate_parameters, "lr": float(cfg["gate_lr"])})
+        optimizer = torch.optim.AdamW(parameter_groups)
+    else:
+        optimizer = torch.optim.AdamW(
+            [parameter for parameter in bundle.modules.parameters() if parameter.requires_grad],
+            lr=cfg["lr"],
+        )
     trajectories = load_jsonl(cfg["data_path"])
     trajectories = trajectories[: cfg.get("max_trajectories", len(trajectories))]
 
@@ -103,7 +131,9 @@ def train_qwen(cfg):
     history = [{
         "event": "setup",
         "hooked_modules": len(bundle.names),
-        "trainable_parameters": sum(p.numel() for p in bundle.modules.parameters()),
+        "trainable_parameters": sum(
+            p.numel() for p in bundle.modules.parameters() if p.requires_grad
+        ),
         "first_hook": bundle.names[0],
         "last_hook": bundle.names[-1],
         "projector_checkpoint": projector_checkpoint,
@@ -283,7 +313,35 @@ def train_qwen_counterfactual(cfg):
         bundle.modules.load_state_dict(
             torch.load(projector_checkpoint, map_location=device, weights_only=True)
         )
-    optimizer = torch.optim.AdamW(bundle.modules.parameters(), lr=cfg["lr"])
+    if cfg.get("gate_only") and cfg.get("freeze_gate"):
+        raise ValueError("gate_only and freeze_gate are mutually exclusive")
+    if cfg.get("state_conditioned_gate"):
+        for name, parameter in bundle.modules.named_parameters():
+            is_gate = any(part in name for part in ("query_gate", "memory_gate", "gate_bias"))
+            if cfg.get("gate_only") and not is_gate:
+                parameter.requires_grad_(False)
+            if cfg.get("freeze_gate") and is_gate:
+                parameter.requires_grad_(False)
+    if cfg.get("state_conditioned_gate") and cfg.get("gate_lr") is not None:
+        gate_parameters, transport_parameters = [], []
+        for name, parameter in bundle.modules.named_parameters():
+            if not parameter.requires_grad:
+                continue
+            if any(part in name for part in ("query_gate", "memory_gate", "gate_bias")):
+                gate_parameters.append(parameter)
+            else:
+                transport_parameters.append(parameter)
+        parameter_groups = []
+        if transport_parameters:
+            parameter_groups.append({"params": transport_parameters, "lr": float(cfg["lr"])})
+        if gate_parameters:
+            parameter_groups.append({"params": gate_parameters, "lr": float(cfg["gate_lr"])})
+        optimizer = torch.optim.AdamW(parameter_groups)
+    else:
+        optimizer = torch.optim.AdamW(
+            [parameter for parameter in bundle.modules.parameters() if parameter.requires_grad],
+            lr=cfg["lr"],
+        )
     rows = load_counterfactual_jsonl(cfg["counterfactual_data"])
     groups = _counterfactual_groups(rows)
     if not groups:
@@ -309,7 +367,9 @@ def train_qwen_counterfactual(cfg):
         "prefixes": len(groups),
         "rows": len(rows),
         "hooked_modules": len(bundle.names),
-        "trainable_parameters": sum(p.numel() for p in bundle.modules.parameters()),
+        "trainable_parameters": sum(
+            p.numel() for p in bundle.modules.parameters() if p.requires_grad
+        ),
         "projector_checkpoint": projector_checkpoint,
     }]
     optimizer.zero_grad(set_to_none=True)
@@ -376,6 +436,13 @@ def train_qwen_counterfactual(cfg):
                 target_tensor = torch.tensor(targets, device=device, dtype=torch.float32)
                 if target_tensor.shape != scored[0][1].shape:
                     raise ValueError("memory advantage count does not match history gate count")
+                scale = float(cfg.get("memory_advantage_scale", 1.0))
+                if scale <= 0:
+                    raise ValueError("memory_advantage_scale must be positive")
+                # A gate represents useful memory, not signed harmfulness.
+                # Negative counterfactual advantage therefore closes the gate;
+                # positive magnitude is normalized to [0, 1].
+                target_tensor = (target_tensor.clamp_min(0) / scale).clamp_max(1)
                 memory_loss = F.binary_cross_entropy(
                     scored[0][1].float().clamp(1e-6, 1 - 1e-6), target_tensor
                 )

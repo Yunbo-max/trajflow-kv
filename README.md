@@ -285,6 +285,17 @@ block may be essential for a later fork even when the current action is
 harmless. Consequently, the next training split must use counterfactual
 `Q(M)-Q(M^-j)` targets rather than action-critical labels.
 
+The resulting two-stage experiment is summarized in
+[`results/tango_memory_credit_two_stage_heldout.json`](results/tango_memory_credit_two_stage_heldout.json).
+Qwen policy counterfactuals measure hidden cue/distractor memory advantages of
+`+0.0913/-0.0136`. Stage 1 freezes transport and learns gates of
+`0.7044/0.0351`; Stage 2 freezes that gate and learns energy-regularized
+transport. On disjoint seeds 20–39, aggregate candidate Top-1 improves from
+`0.9524` to `0.9857`, hidden-memory Top-1 from `0.8333` to `0.9500`, critical
+accuracy stays `1.00`, and non-critical mean absolute score change is only
+`0.01683`. These are controlled held-out ranking results over shared task
+templates, not yet real-environment online success.
+
 Build state-conditioned preference pairs and train the fork projector from a
 return checkpoint:
 
