@@ -147,6 +147,17 @@ plateaus after H=3 and first-only is strongest on this tiny split. We therefore
 require a larger same-prefix delayed-consequence split before making that
 claim.
 
+The expanded MiniWoB click-only power pilot is recorded in
+[`results/tango_miniwob_click4_s701_800.json`](results/tango_miniwob_click4_s701_800.json).
+Across four families and 100 shared seeds each, Base/Warm/Return/CE/Shuffle
+succeed on `329/330/330/333/328` of 400 cases. Return ties the warm start and
+trails CE by `0.75pp`; its paired 95% interval versus CE is `[-2.25pp, 0]` and
+exact McNemar `p=0.25`. All action differences occur on `click-color`, while
+the other families are unchanged or saturated. Return does raise mean
+candidate margin to `0.17110` from Base `0.15017`, but this does not convert to
+task success. The expanded online gate therefore fails and MiniWoB remains a
+diagnostic rather than a positive headline result.
+
 A second MiniWoB gate trains directly on 40 seeded random legal-click
 trajectories (19 successful) and evaluates 20 independent trajectories. The
 held-out success/failure score margin rises from `0.12792` at the shared
