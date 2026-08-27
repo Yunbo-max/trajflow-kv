@@ -97,6 +97,17 @@ AITW metric by only about `0.18%`; fork shaping costs about `1.87%`. The
 low-energy checkpoint lowers activation energy but does not beat unregularized
 return training on this retention metric.
 
+An additional bounded cross-dataset probe uses 32 untouched actions from the
+official Mind2Web public training shard, with one positive and four seeded
+negative DOM candidates per action. Base and pure AndroidWorld Return-KV both
+score Top-1/MRR `0.5000/0.6766`; the mean correct margin changes from
+`-0.01402` to `-0.01324`. The low-energy checkpoint scores
+`0.4688/0.6609`, and the fork/coordinate merged student scores
+`0.4688/0.6557`. Thus pure return training preserves this Web grounding probe
+but does not demonstrate a discrete cross-domain gain; stronger shaping causes
+a one-example Top-1 regression. This small public-train probe is not presented
+as an official Mind2Web benchmark result.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash
@@ -179,6 +190,22 @@ the student with no hooks:
   --merged-checkpoint outputs/gonogo/internalized_return_fork_coord/merged_weights.pt \
   --data data/androidworld/multitask_system_heldout.jsonl \
   --output outputs/gonogo/internalized_return_fork_coord/heldout_ranking.json
+```
+
+Download the smallest official Mind2Web training shard, build the fixed
+candidate fixture, and reproduce the cross-dataset probe (raw data stays
+gitignored):
+
+```bash
+./scripts/download_mind2web_sample.sh
+.venv/bin/python scripts/prepare_mind2web.py \
+  data/mind2web_raw/train_10.json data/mind2web_eval.jsonl \
+  --limit 32 --negatives 4 --seed 17
+
+.venv/bin/python scripts/evaluate_mind2web_ranking.py \
+  --data data/mind2web_eval.jsonl \
+  --checkpoint outputs/gonogo/multitask_v2_warm_return_v_r8_l8_a8_e10/kv_projectors.pt \
+  --output outputs/gonogo/mind2web_return.json
 ```
 
 ## What is and is not implemented

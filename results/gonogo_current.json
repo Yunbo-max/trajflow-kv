@@ -130,6 +130,14 @@
     "fork_coordinate_checkpoint": -6.1119962037,
     "interpretation": "Pure return training causes only a 0.18% relative log-prob degradation. Strong fork/coordinate shaping costs about 1.87%. The low-energy setting reduces transport energy but does not outperform unregularized return training on AITW retention."
   },
+  "mind2web_cross_dataset_ranking": {
+    "source": "Official public train_10 shard; 32 untouched evaluation actions from sports.yahoo, kohls, and travelzoo, with one positive and four seeded negative DOM candidates per action",
+    "base": {"top1": 0.5, "mrr": 0.6765625, "mean_correct_margin": -0.0140187668},
+    "androidworld_return_epoch_10": {"top1": 0.5, "mrr": 0.6765625, "mean_correct_margin": -0.0132385029},
+    "low_energy_lambda_3000": {"top1": 0.46875, "mrr": 0.6609375, "mean_correct_margin": -0.0158976230},
+    "fork_coordinate_merged_student": {"top1": 0.46875, "mrr": 0.6557291667, "mean_correct_margin": -0.0180646428},
+    "interpretation": "The pure return projector preserves base Web element ranking and slightly improves the mean margin, but provides no discrete cross-domain gain. Low-energy and stronger fork/coordinate shaping each regress one of 32 Top-1 decisions. This is a bounded cross-dataset probe, not a Mind2Web benchmark claim."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",
