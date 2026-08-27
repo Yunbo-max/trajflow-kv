@@ -284,12 +284,46 @@ def build_visual_counterfactual_dataset(
     destination = Path(output_dir)
     selected_tasks = tuple(tasks) if tasks is not None else visual_delayed_tasks()
     rows: list[dict[str, Any]] = []
+    # Prefixes are shared by all candidate rows.  Render the visual history
+    # once per prefix and pass it explicitly to the VLM; otherwise a delayed
+    # cue benchmark silently degenerates into a current-screenshot benchmark.
+    rendered_histories: dict[str, list[str]] = {}
     for task in selected_tasks:
         for seed in tuple(int(item) for item in seeds):
             examples = build_counterfactual_examples(task, seed, horizon=horizon, aggregation=aggregation)
             for row in examples:
                 image_path = destination / f"{task.task_family}_s{seed}_{row['prefix_id'].rsplit('-', 1)[-1]}.png"
                 task.render_screenshot(row["prefix"]["state"], image_path)
+                prefix_id = str(row["prefix_id"])
+                history_images = rendered_histories.get(prefix_id)
+                if history_images is None:
+                    history_images = []
+                    replay_state = task.initial_state(seed)
+                    prefix_history = list(row["prefix"].get("history", []))
+                    # Include observations that preceded the current decision,
+                    # including the initial cue screenshot.  The current
+                    # screenshot remains in ``image`` and is not duplicated.
+                    history_path = destination / (
+                        f"{task.task_family}_s{seed}_{prefix_id.rsplit('-', 1)[-1]}_history0.png"
+                    )
+                    task.render_screenshot(replay_state, history_path)
+                    history_images.append(str(history_path))
+                    for history_index, history_action in enumerate(prefix_history, start=1):
+                        replay_state, _ = task.step(replay_state, str(history_action))
+                        # The final replay state is the current screenshot and
+                        # is deliberately kept out of history_images.
+                        if history_index < len(prefix_history):
+                            history_path = destination / (
+                                f"{task.task_family}_s{seed}_{prefix_id.rsplit('-', 1)[-1]}"
+                                f"_history{history_index}.png"
+                            )
+                            task.render_screenshot(replay_state, history_path)
+                            history_images.append(str(history_path))
+                    # The final replay state should agree with the immutable
+                    # prefix state; fail loudly if a collector changes them.
+                    if replay_state != row["prefix"]["state"]:
+                        raise ValueError(f"history replay mismatch for {prefix_id}")
+                    rendered_histories[prefix_id] = history_images
                 observation = row["prefix"]["observation"]
                 critical_actions = list(task.critical_actions(row["prefix"]["state"]))
                 optimal_actions = list(task.optimal_actions(row["prefix"]["state"]))
@@ -298,6 +332,7 @@ def build_visual_counterfactual_dataset(
                     visual=True,
                     image=str(image_path),
                     screenshot_path=str(image_path),
+                    history_images=list(history_images),
                     critical_step=bool(critical_actions),
                     critical_actions=critical_actions,
                     optimal_actions=optimal_actions,
@@ -309,6 +344,7 @@ def build_visual_counterfactual_dataset(
                 )
                 row["prefix"]["image"] = str(image_path)
                 row["prefix"]["screenshot_path"] = str(image_path)
+                row["prefix"]["history_images"] = list(history_images)
                 row["prefix"]["critical_step"] = bool(critical_actions)
                 row["prefix"]["critical_actions"] = critical_actions
                 row["prefix"]["optimal_actions"] = optimal_actions

@@ -202,10 +202,21 @@ def _score_groups(
         for group in groups:
             scored_group: list[dict[str, Any]] = []
             for row in group:
+                history_paths = []
+                for history_image in row.get("history_images", []) or (row.get("prefix") or {}).get("history_images", []):
+                    history_path = Path(str(history_image))
+                    if not history_path.exists():
+                        data_path = row.get("_data_path")
+                        if data_path:
+                            history_path = Path(str(data_path)).parent / history_path
+                    if history_path.exists():
+                        history_paths.append(history_path)
                 image_path = _path_from_row(row)
                 image = Image.open(image_path).convert("RGB") if image_path else None
                 prompt = str(row["prompt"]) if row.get("prompt") else _counterfactual_prompt(row)
                 content = []
+                for history_path in history_paths:
+                    content.append({"type": "image", "image": Image.open(history_path).convert("RGB")})
                 if image is not None:
                     content.append({"type": "image", "image": image})
                 content.append({"type": "text", "text": prompt})

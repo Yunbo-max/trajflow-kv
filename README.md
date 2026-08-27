@@ -215,10 +215,13 @@ The screenshot-backed pilot is a deterministic, emulator-free GUI benchmark
 for the return-to-credit gate. `distractor_credit` places harmless X/Y actions
 around a hidden A/B fork; `hidden_memory` shows a color cue that disappears
 before the choice. Each candidate row keeps the existing
-`tango.counterfactual.v1` fields and adds `image`, `critical_step`,
-`critical_actions`, `optimal_actions`, and `is_critical_action`. The generated
-PNG is the VLM observation, while the task state machine remains directly
-executable for online replay.
+`tango.counterfactual.v1` fields and adds `image`, `history_images`,
+`critical_step`, `critical_actions`, `optimal_actions`, and
+`is_critical_action`. `history_images` contains the visual observations before
+the current decision (including a vanished cue), while `image` is the current
+screen. This distinction is essential: a current-screen-only evaluator cannot
+test latent visual memory. The task state machine remains directly executable
+for online replay.
 
 Generate a small pilot (screenshots are intentionally ignored by git):
 
@@ -248,6 +251,15 @@ score changes:
 
 Omit `--checkpoint` to evaluate the zero-residual base VLM. This is an offline
 counterfactual ranking diagnostic; it is not an online GUI success result.
+
+The first history-aware P0 rerun is recorded in
+[`results/tango_p0_history_memory.json`](results/tango_p0_history_memory.json).
+On 400 prefixes (60 critical), warm-start reaches 100% critical-fork accuracy
+once the earlier screenshots are actually supplied. One-epoch CE and TANGO
+both reach 100% critical-fork accuracy and 100% candidate Top-1 on this small
+pilot, so this is a protocol/backbone diagnostic rather than evidence that
+TANGO beats CE. Their large non-critical score shifts also motivate the next
+state-conditioned memory gate and causal KV-block ablation.
 
 Build state-conditioned preference pairs and train the fork projector from a
 return checkpoint:

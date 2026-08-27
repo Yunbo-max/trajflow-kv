@@ -304,6 +304,9 @@ def train_qwen_counterfactual(cfg):
 
     def action_score(row: dict, action: object) -> torch.Tensor:
         content = []
+        for history_image_path in row.get("history_images", []) or (row.get("prefix") or {}).get("history_images", []):
+            history_image = Image.open(history_image_path).convert("RGB")
+            content.append({"type": "image", "image": history_image})
         image_path = row.get("image") or (row.get("prefix") or {}).get("image")
         loaded_image = Image.open(image_path).convert("RGB") if image_path else None
         if loaded_image is not None:

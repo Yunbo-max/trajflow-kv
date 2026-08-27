@@ -39,6 +39,10 @@ def test_hidden_memory_hides_cue_in_choice_screenshot_and_executes(tmp_path):
     choose = next(group for group in _group(rows).values() if group[0]["prefix"]["state"]["phase"] == "choose")
     assert all(row["critical_step"] for row in choose)
     assert all(row["is_critical_action"] for row in choose)
+    # The delayed cue is available as an earlier visual observation, while
+    # the current choice screenshot intentionally hides it.
+    assert choose[0]["history_images"]
+    assert all(Image.open(path).size == (960, 600) for path in choose[0]["history_images"])
     image_path = choose[0]["image"]
     assert Image.open(image_path).size == (960, 600)
     # Seed 1 selects blue; the state machine is directly executable.
@@ -59,4 +63,3 @@ def test_visual_rows_roundtrip_existing_counterfactual_schema(tmp_path):
     assert len(loaded) == len(rows)
     assert {row["task_family"] for row in loaded} == {"hidden_memory"}
     assert all(json.loads(json.dumps(row["prefix"]))["screenshot_path"] for row in loaded)
-
