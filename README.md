@@ -108,6 +108,79 @@ The principal 20-epoch run is reproducible with:
   --target v --last-n-layers 8 --rank 8 --alpha 8 --epochs 20
 ```
 
+## Reproducing the later phases
+
+Build state-conditioned preference pairs and train the fork projector from a
+return checkpoint:
+
+```bash
+.venv/bin/python scripts/make_fork_pairs.py \
+  data/androidworld/multitask_return_train_v2.jsonl \
+  data/androidworld/system_fork_pairs_v1.jsonl \
+  --task-prefix System --max-per-decision 1
+
+.venv/bin/python scripts/make_coordinate_forks.py \
+  data/androidworld/multitask_return_train_v2.jsonl \
+  data/androidworld/system_coordinate_forks_v1.jsonl \
+  --task-prefix System --offsets 100 200 350
+
+.venv/bin/python scripts/train_fork_preferences.py \
+  --checkpoint outputs/gonogo/multitask_v2_warm_return_v_r8_l8_a8_e20/kv_projectors.pt \
+  --data data/androidworld/system_fork_pairs_v1.jsonl \
+  --output-dir outputs/gonogo/return_e20_fork_v1_e5 --epochs 5
+```
+
+Run the calibrated low-energy point and evaluate both return separation and
+activation transport energy:
+
+```bash
+.venv/bin/python -m trajflow_kv.train \
+  --config configs/qwen_androidworld.yaml \
+  --data-path data/androidworld/multitask_return_train_v2.jsonl \
+  --output-dir outputs/gonogo/return_energy3e3_v_r8_l8_a8_e10 \
+  --projector-checkpoint outputs/gonogo/initial_v_l8/kv_projectors.pt \
+  --target v --last-n-layers 8 --rank 8 --alpha 8 --epochs 10 \
+  --lambda-energy 3000
+
+.venv/bin/python scripts/evaluate_return_margin.py \
+  --checkpoint outputs/gonogo/return_energy3e3_v_r8_l8_a8_e10/kv_projectors.pt \
+  --data data/androidworld/multitask_system_heldout.jsonl \
+  --output outputs/gonogo/energy_compare_energy3e3.json \
+  --target v --last-n-layers 8 --rank 8 --alpha 8
+```
+
+The critic and flow gates are independently reproducible:
+
+```bash
+.venv/bin/python scripts/train_trajectory_critic.py \
+  --train-data data/androidworld/multitask_return_train_v2.jsonl \
+  --train-scores outputs/gonogo/critic_initial_train_scores.json \
+  --heldout-data data/androidworld/multitask_system_heldout.jsonl \
+  --heldout-scores outputs/gonogo/heldout_margin_initial_a8.json \
+  --output-dir outputs/gonogo/linear_critic_s23 --seed 23
+
+.venv/bin/python scripts/train_action_flow.py \
+  --train data/androidworld/multitask_success_sft_v2.jsonl \
+  --heldout data/androidworld/multitask_system_heldout.jsonl \
+  --output-dir outputs/gonogo/action_flow_projected_s31 \
+  --epochs 3000 --samples 128 --seed 31
+```
+
+Finally, fold the trained KV residual into ordinary model weights and evaluate
+the student with no hooks:
+
+```bash
+.venv/bin/python scripts/merge_projector_checkpoint.py \
+  --checkpoint outputs/gonogo/return_fork_click_e3_coord_e2/kv_projectors.pt \
+  --output outputs/gonogo/internalized_return_fork_coord/merged_weights.pt \
+  --target v --last-n-layers 8 --rank 8 --alpha 8
+
+.venv/bin/python scripts/evaluate_action_ranking.py \
+  --merged-checkpoint outputs/gonogo/internalized_return_fork_coord/merged_weights.pt \
+  --data data/androidworld/multitask_system_heldout.jsonl \
+  --output outputs/gonogo/internalized_return_fork_coord/heldout_ranking.json
+```
+
 ## What is and is not implemented
 
 - Implemented: online KV hooks (no cached activation dataset), K/V/both
@@ -117,9 +190,11 @@ The principal 20-epoch run is reproducible with:
   candidate ranking, loop guards, and smoke tests.
 - Adapter-ready: AndroidWorld rollouts can be exported into the same JSONL
   schema using `scripts/androidworld_to_jsonl.py`.
-- Deferred deliberately: flow action sampler, learned critic, and student
-  distillation. These are Phase 2-4 and should be evaluated only after the
-  return-driven projector baseline works.
+- Implemented and gated: rectified-flow action chunks, learned trajectory
+  critic, screenshot/instruction state routing, and hook-free weight folding.
+  Flow passes candidate-coverage but not average-policy selection; the critic
+  is a data-limited no-go; exact weight folding passes the internalization
+  equivalence check.
 
 ## Quick start (no model download)
 
