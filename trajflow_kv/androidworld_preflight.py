@@ -26,25 +26,32 @@ def inspect_androidworld(
     timeout: float = 60.0,
 ) -> dict:
     client = AndroidWorldHTTPClient(server_url, timeout=timeout)
-    pixels = client.screenshot(wait_to_stabilize=False)
+    failures = []
+    try:
+        pixels = client.screenshot(wait_to_stabilize=False)
+        server_health = client.health()
+    except Exception as exc:  # preflight must report an absent guest, not crash
+        pixels = np.zeros((0, 0, 3), dtype=np.uint8)
+        server_health = False
+        failures.append(f"AndroidWorld server unavailable: {type(exc).__name__}")
     activity = adb_output(adb, "service", "check", "activity")
     focus = adb_output(adb, "dumpsys", "window", "windows")
     system_pid = adb_output(adb, "pidof", "system_server")
     lowered_focus = focus.lower()
     result = {
-        "server_health": client.health(),
+        "server_health": server_health,
         "screen_shape": list(pixels.shape),
-        "screen_mean": float(np.mean(pixels)),
-        "screen_std": float(np.std(pixels)),
+        "screen_mean": float(np.mean(pixels)) if pixels.size else None,
+        "screen_std": float(np.std(pixels)) if pixels.size else None,
         "activity_service": activity,
         "system_server_pid": system_pid,
         "anr_dialog_visible": any(marker in lowered_focus for marker in ANR_MARKERS),
         "kvm_available": Path("/dev/kvm").exists(),
         "require_kvm": require_kvm,
     }
-    failures = []
     if not result["server_health"]:
-        failures.append("server health endpoint failed")
+        if not any(item.startswith("AndroidWorld server unavailable") for item in failures):
+            failures.append("server health endpoint failed")
     if pixels.size == 0 or result["screen_std"] < 1.0:
         failures.append("screenshot is blank or near-constant")
     if "found" not in activity.lower() or not system_pid.isdigit():
