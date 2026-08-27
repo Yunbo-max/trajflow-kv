@@ -19,6 +19,7 @@ train = [
   "safetensors>=0.4"
 ]
 test = ["pytest>=8"]
+browser = ["browsergym-miniwob==0.14.3"]
 
 [tool.setuptools.packages.find]
 include = ["trajflow_kv*"]

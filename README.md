@@ -123,6 +123,19 @@ but does not demonstrate a discrete cross-domain gain; stronger shaping causes
 a one-example Top-1 regression. This small public-train probe is not presented
 as an official Mind2Web benchmark result.
 
+To obtain an online cross-environment check without relying on the unstable
+Android software guest, the repository also includes a BrowserGym MiniWoB
+adapter. Using BrowserGym `0.14.3`, MiniWoB++ commit
+`7fd85d71a4b60325c6585396ec4f48377d049838`, six click/sequence/checkbox/radio/
+color tasks, and 24 paired episodes, Base and fork/coordinate KV both succeed
+on `22/24`. There are zero improved and zero regressed pairs, and all 24 action
+sequences are identical. Mean candidate Top-1 margin changes slightly from
+`0.11080` to `0.11072`. One shared failure is a seeded page layout where
+Playwright reports that overlapping button TWO intercepts a click on button
+ONE; the other is an incorrect visual choice among unlabeled colored boxes.
+This is online cross-environment no-regression evidence, not a
+cross-environment return improvement.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash
@@ -221,6 +234,17 @@ gitignored):
   --data data/mind2web_eval.jsonl \
   --checkpoint outputs/gonogo/multitask_v2_warm_return_v_r8_l8_a8_e10/kv_projectors.pt \
   --output outputs/gonogo/mind2web_return.json
+```
+
+Set up the pinned MiniWoB environment and reproduce the online paired probe:
+
+```bash
+.venv/bin/pip install '.[browser]'
+.venv/bin/playwright install chromium
+git clone https://github.com/Farama-Foundation/miniwob-plusplus.git /root/miniwob-plusplus
+git -C /root/miniwob-plusplus checkout 7fd85d71a4b60325c6585396ec4f48377d049838
+export MINIWOB_URL='file:///root/miniwob-plusplus/miniwob/html/miniwob/'
+./scripts/run_miniwob_gate.sh
 ```
 
 ## What is and is not implemented
