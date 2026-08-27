@@ -35,6 +35,14 @@ and three temperature-0.2 seeds. Wi-Fi still fails because the policy acts
 before the quick-settings shade is fully expanded. The next gate is therefore
 learned state routing and cross-task online replication.
 
+A later recovered-emulator Wi-Fi pair (deterministic seed 301) used the same
+64x64 task-conditioned router in both arms and still scored base `0/1` versus
+KV `0/1`, with no invalid actions. The first swipe visibly exposed the Internet
+tile, but the following nominal tap returned to the launcher and opened a
+long-press menu under software TCG. This is retained as a failed pair, not a
+cross-task success; it also leaves policy error and emulator input timing
+confounded until the run can be repeated with hardware virtualization.
+
 A lightweight screenshot-conditioned state router is also included. On the
 current independent system-task split it reaches `5/6` action-type accuracy
 (`3/3` on click states). Its cross-task online result is still pending because
