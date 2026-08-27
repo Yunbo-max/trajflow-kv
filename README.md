@@ -261,12 +261,18 @@ pilot, so this is a protocol/backbone diagnostic rather than evidence that
 TANGO beats CE. Their large non-critical score shifts also motivate the next
 state-conditioned memory gate and causal KV-block ablation.
 
-As a cheap visual-provenance diagnostic, the same 60 critical prefixes score
-`1.00` with full history, `0.45` after dropping history image 0 (the cue), and
-`1.00` after dropping history image 1 (a later harmless observation). This
-shows that the corrected benchmark contains a real causal visual-memory
-signal, while still not claiming that the current fixed projector has learned
-that signal robustly.
+The v2 diagnostic adds a genuinely independent harmless screen between cue
+and decision; results are recorded in
+[`results/tango_memory_credit_v2_pilot20.json`](results/tango_memory_credit_v2_pilot20.json).
+On its 20 hidden-memory critical prefixes, full history scores `1.00`, removing
+the cue block falls to `0.35`, and removing the distractor block remains
+`1.00`. Decoder ablation localizes the strongest signal to early/middle K and
+middle V, with no effect from the late third. A middle-layer state-conditioned
+K+V gate preserves the zero-gate Top-1/critical results (`0.9524/1.00`) while
+reducing non-critical mean absolute score change from the old fixed
+projector's `3.41` to `0.01475` (about 231x). Its cue/distractor mean gates are
+`0.1727/0.1508`, so localization is directionally correct but still weak; this
+is a stability/mechanism result, not yet a policy-gain result.
 
 Build state-conditioned preference pairs and train the fork projector from a
 return checkpoint:

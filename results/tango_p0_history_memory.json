@@ -36,6 +36,6 @@
     "warm_full_history_critical_fork_accuracy": 1.0,
     "warm_drop_history_index_0_critical_fork_accuracy": 0.45,
     "warm_drop_history_index_1_critical_fork_accuracy": 1.0,
-    "interpretation": "Removing the earliest cue screenshot destroys the delayed decision, while removing the later harmless history screenshot does not. This is visual-evidence provenance evidence; decoder-KV block ablation is the next step."
+    "interpretation": "Removing the earliest cue screenshot destroys the delayed decision. In this v1 dataset, history index 1 was absent at the critical prefix, so that condition was an empty-operation control and is superseded by tango_memory_credit_v2_pilot20.json."
   }
 }

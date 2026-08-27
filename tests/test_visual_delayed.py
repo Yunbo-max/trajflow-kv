@@ -48,6 +48,8 @@ def test_hidden_memory_hides_cue_in_choice_screenshot_and_executes(tmp_path):
     # Seed 1 selects blue; the state machine is directly executable.
     state = task.initial_state(1)
     state, done = task.step(state, "continue")
+    assert not done and state["phase"] == "distractor"
+    state, done = task.step(state, "acknowledge")
     assert not done and state["phase"] == "choose"
     state, done = task.step(state, "choose_blue")
     assert not done and state["phase"] == "submit"

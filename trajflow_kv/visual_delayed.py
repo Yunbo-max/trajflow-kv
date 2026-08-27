@@ -179,7 +179,7 @@ class DistractorCreditTask(VisualDelayedTask):
 
 
 class HiddenMemoryTask(VisualDelayedTask):
-    """A visible cue disappears before the visual choice screen."""
+    """A cue, a harmless intervening screen, then a delayed visual choice."""
 
     task_family = "hidden_memory"
     instruction = "Remember the banner color, then select that color after it disappears."
@@ -191,6 +191,8 @@ class HiddenMemoryTask(VisualDelayedTask):
     def available_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
         if state["phase"] == "cue":
             return ("continue",)
+        if state["phase"] == "distractor":
+            return ("acknowledge",)
         if state["phase"] == "choose":
             return tuple(f"choose_{color}" for color in self.colors)
         if state["phase"] == "submit":
@@ -201,6 +203,8 @@ class HiddenMemoryTask(VisualDelayedTask):
         phase = state["phase"]
         if phase == "cue":
             screen = f"A banner shows the color {state['cue']}. Press continue."
+        elif phase == "distractor":
+            screen = "A neutral status screen contains no color cue. Press acknowledge."
         elif phase == "choose":
             screen = "The banner disappeared. Select the color you remember."
         elif phase == "submit":
@@ -217,13 +221,16 @@ class HiddenMemoryTask(VisualDelayedTask):
             return (f"choose_{state['cue']}",)
         if state["phase"] == "submit" and state.get("choice") == state.get("cue"):
             return ("submit",)
-        return tuple(self.available_actions(state)) if state["phase"] == "cue" else ()
+        return tuple(self.available_actions(state)) if state["phase"] in {"cue", "distractor"} else ()
 
     def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
         state = self.clone(state)
         state["history"].append(action)
         phase = state["phase"]
         if phase == "cue" and action == "continue":
+            state["phase"] = "distractor"
+            return state, False
+        if phase == "distractor" and action == "acknowledge":
             state["phase"] = "choose"
             return state, False
         if phase == "choose" and action in self.available_actions(state):
@@ -248,6 +255,9 @@ class HiddenMemoryTask(VisualDelayedTask):
             draw.rounded_rectangle((50, 150, 910, 240), radius=12, fill=color)
             draw.text((75, 185), f"MEMORIZE: {state['cue'].upper()}", fill="white", font=_font())
             labels = ("Continue",)
+        elif phase == "distractor":
+            draw.text((50, 170), "Neutral status update — no color cue is visible.", fill=(30, 38, 50), font=_font())
+            labels = ("Acknowledge",)
         elif phase == "choose":
             draw.text((50, 170), "The banner is gone. Which color was shown?", fill=(30, 38, 50), font=_font())
             labels = tuple(color.title() for color in self.colors)

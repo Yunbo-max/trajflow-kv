@@ -6,6 +6,8 @@ from typing import Iterable
 import torch
 from torch import nn
 
+from .causal_ablation import decoder_layer_index, vision_token_spans
+
 
 class LowRankResidual(nn.Module):
     """x -> x + alpha * A(B(x)); initialized as an identity modification."""
@@ -38,6 +40,47 @@ class LowRankResidual(nn.Module):
         return (gram - eye).square().mean()
 
 
+class StateConditionedLowRankResidual(LowRankResidual):
+    """Low-rank transport gated per memory token by the decision state."""
+
+    def __init__(self, width: int, rank: int, alpha: float, gate_rank: int = 16):
+        super().__init__(width, rank, alpha)
+        self.query_gate = nn.Linear(width, gate_rank, bias=False)
+        self.memory_gate = nn.Linear(width, gate_rank, bias=False)
+        self.gate_bias = nn.Parameter(torch.tensor(-2.0))
+        self._memory_mask: torch.Tensor | None = None
+        self._decision_index: int | None = None
+        self.last_gate: torch.Tensor | None = None
+
+    def set_context(self, memory_mask: torch.Tensor, decision_index: int) -> None:
+        self._memory_mask = memory_mask
+        self._decision_index = int(decision_index)
+
+    def clear_context(self) -> None:
+        self._memory_mask = None
+        self._decision_index = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self._memory_mask is None or self._decision_index is None:
+            self.last_delta = torch.zeros_like(x)
+            self.last_gate = None
+            return x
+        if self._decision_index >= x.shape[-2]:
+            raise ValueError("decision index outside K/V sequence")
+        mask = self._memory_mask.to(device=x.device)
+        if mask.shape[-1] != x.shape[-2]:
+            raise ValueError("memory mask length does not match K/V sequence")
+        query = self.query_gate(x[..., self._decision_index : self._decision_index + 1, :])
+        memory = self.memory_gate(x)
+        logits = (query * memory).sum(dim=-1, keepdim=True) / (query.shape[-1] ** 0.5)
+        gate = torch.sigmoid(logits + self.gate_bias)
+        gate = gate * mask[..., None].to(gate.dtype)
+        delta = self.up(self.down(x)) * self.scale * gate
+        self.last_gate = gate
+        self.last_delta = delta
+        return x + delta
+
+
 @dataclass
 class HookedProjectors:
     modules: nn.ModuleList
@@ -53,6 +96,26 @@ class HookedProjectors:
     def close(self) -> None:
         for handle in self.handles:
             handle.remove()
+
+    def set_visual_memory_context(
+        self, input_ids: torch.Tensor, history_image_count: int, decision_index: int
+    ) -> None:
+        spans = vision_token_spans(input_ids)
+        if history_image_count > len(spans):
+            raise ValueError("history image count exceeds visual token blocks")
+        mask = torch.zeros_like(input_ids, dtype=torch.bool)
+        for start, end in spans[:history_image_count]:
+            mask[..., start:end] = True
+        for module in self.modules:
+            setter = getattr(module, "set_context", None)
+            if setter is not None:
+                setter(mask, decision_index)
+
+    def clear_context(self) -> None:
+        for module in self.modules:
+            clearer = getattr(module, "clear_context", None)
+            if clearer is not None:
+                clearer()
 
 
 def attach_kv_projectors(
@@ -93,6 +156,46 @@ def attach_kv_projectors(
         ))
         names.append(name)
     model.add_module("trajflow_kv_projectors", projectors)
+    return HookedProjectors(projectors, handles, names)
+
+
+def attach_gated_kv_projectors(
+    model: nn.Module,
+    rank: int,
+    alpha: float,
+    target: str = "both",
+    layers: Iterable[int] | None = None,
+    gate_rank: int = 16,
+) -> HookedProjectors:
+    """Attach state-conditioned transport only to selected decoder layers."""
+    if target not in {"k", "v", "both"}:
+        raise ValueError("target must be k, v, or both")
+    suffixes = {"k": ("k_proj",), "v": ("v_proj",), "both": ("k_proj", "v_proj")}[target]
+    layer_set = set(int(layer) for layer in layers) if layers is not None else None
+    selected = []
+    for name, module in model.named_modules():
+        if name.rsplit(".", 1)[-1] not in suffixes or not isinstance(module, nn.Linear):
+            continue
+        layer = decoder_layer_index(name)
+        if layer is None:
+            continue
+        if layer_set is None or layer in layer_set:
+            selected.append((name, module))
+    if not selected:
+        raise RuntimeError("No decoder K/V modules selected for gated transport")
+
+    projectors = nn.ModuleList()
+    handles, names = [], []
+    for name, linear in selected:
+        projector = StateConditionedLowRankResidual(
+            linear.out_features, rank, alpha, gate_rank=gate_rank
+        ).to(device=linear.weight.device, dtype=linear.weight.dtype)
+        projectors.append(projector)
+        handles.append(linear.register_forward_hook(
+            lambda _module, _inputs, output, p=projector: p(output)
+        ))
+        names.append(name)
+    model.add_module("trajflow_kv_gated_projectors", projectors)
     return HookedProjectors(projectors, handles, names)
 
 

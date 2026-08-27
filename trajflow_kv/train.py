@@ -12,7 +12,7 @@ from torch import nn
 from .data import load_jsonl
 from .counterfactual import load_counterfactual_jsonl
 from .objective import normalized_advantages, shuffle_within_tasks, trajectory_policy_loss
-from .projector import attach_kv_projectors
+from .projector import attach_gated_kv_projectors, attach_kv_projectors
 from .training_controls import controlled_returns, remove_prompt_history, select_trajectory_steps
 from .tango_advantage import counterfactual_objective_loss
 
@@ -263,9 +263,19 @@ def train_qwen_counterfactual(cfg):
         parameter.requires_grad_(False)
     model.config.use_cache = False
     model.gradient_checkpointing_enable()
-    bundle = attach_kv_projectors(
-        model, cfg["rank"], cfg["alpha"], cfg["target"], cfg.get("last_n_layers")
-    )
+    if cfg.get("state_conditioned_gate"):
+        bundle = attach_gated_kv_projectors(
+            model,
+            cfg["rank"],
+            cfg["alpha"],
+            cfg["target"],
+            layers=cfg.get("gated_layers"),
+            gate_rank=int(cfg.get("gate_rank", 16)),
+        )
+    else:
+        bundle = attach_kv_projectors(
+            model, cfg["rank"], cfg["alpha"], cfg["target"], cfg.get("last_n_layers")
+        )
     projector_checkpoint = cfg.get("projector_checkpoint")
     if projector_checkpoint:
         bundle.modules.load_state_dict(
@@ -324,7 +334,18 @@ def train_qwen_counterfactual(cfg):
         ).to(device)
         labels = batch["input_ids"].clone()
         labels[:, :prompt_batch["input_ids"].shape[1]] = -100
-        output = model(**batch, labels=labels, use_cache=False)
+        if cfg.get("state_conditioned_gate"):
+            history_count = len(
+                row.get("history_images", [])
+                or (row.get("prefix") or {}).get("history_images", [])
+            )
+            bundle.set_visual_memory_context(
+                batch["input_ids"], history_count, prompt_batch["input_ids"].shape[1] - 1
+            )
+        try:
+            output = model(**batch, labels=labels, use_cache=False)
+        finally:
+            bundle.clear_context()
         valid = (labels != -100).sum().clamp_min(1)
         # Mean token log-prob is consistent with existing candidate ranking
         # and prevents longer JSON actions from winning by length alone.

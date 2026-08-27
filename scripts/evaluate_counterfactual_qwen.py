@@ -25,7 +25,8 @@ import torch
 from PIL import Image
 
 from trajflow_kv.counterfactual import load_counterfactual_jsonl
-from trajflow_kv.projector import attach_kv_projectors
+from trajflow_kv.causal_ablation import vision_token_spans
+from trajflow_kv.projector import attach_gated_kv_projectors, attach_kv_projectors
 from trajflow_kv.train import _counterfactual_prompt
 
 
@@ -106,6 +107,7 @@ def summarize_policy_scores(
                     "Q": float(row.get("Q", 0.0)),
                     "advantage": float(row.get("advantage", 0.0)),
                     "is_critical_action": bool(row.get("is_critical_action", False)),
+                    **({"memory_gate_means": row["memory_gate_means"]} if "memory_gate_means" in row else {}),
                 }
                 for row in group
             ],
@@ -134,6 +136,25 @@ def summarize_policy_scores(
         "critical_fork_accuracy": _rate(critical_rows, "critical_fork_correct"),
         "families": family_summary,
         "prefix_results": prefix_results,
+    }
+
+
+def summarize_memory_gate_values(prefix_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate per-history-block gates once per immutable prefix."""
+    buckets: dict[tuple[str, bool, int], list[float]] = defaultdict(list)
+    for result in prefix_results:
+        candidates = result.get("candidates", [])
+        if not candidates or "memory_gate_means" not in candidates[0]:
+            continue
+        for index, value in enumerate(candidates[0]["memory_gate_means"]):
+            if value is not None:
+                buckets[(result["task_family"], bool(result["critical_step"]), index)].append(float(value))
+    return {
+        f"{family}|{'critical' if critical else 'noncritical'}|history_{index}": {
+            "prefixes": len(values),
+            "mean_gate": sum(values) / len(values),
+        }
+        for (family, critical, index), values in sorted(buckets.items())
     }
 
 
@@ -197,6 +218,9 @@ def _score_groups(
     groups: list[list[dict[str, Any]]],
     device: str,
     drop_history_index: int | None = None,
+    kv_ablator: Any | None = None,
+    ablate_image_index: int = 0,
+    memory_bundle: Any | None = None,
 ) -> list[list[dict[str, Any]]]:
     scored: list[list[dict[str, Any]]] = []
     with torch.inference_mode():
@@ -239,10 +263,38 @@ def _score_groups(
                 ).to(device)
                 labels = batch["input_ids"].clone()
                 labels[:, :prompt_batch["input_ids"].shape[1]] = -100
-                output = model(**batch, labels=labels, use_cache=False)
+                if kv_ablator is not None:
+                    kv_ablator.set_image(batch["input_ids"], ablate_image_index)
+                if memory_bundle is not None:
+                    memory_bundle.set_visual_memory_context(
+                        batch["input_ids"], len(history_paths),
+                        prompt_batch["input_ids"].shape[1] - 1,
+                    )
+                try:
+                    output = model(**batch, labels=labels, use_cache=False)
+                finally:
+                    if kv_ablator is not None:
+                        kv_ablator.clear()
+                    if memory_bundle is not None:
+                        memory_bundle.clear_context()
+                memory_gate_means = None
+                if memory_bundle is not None:
+                    spans = vision_token_spans(batch["input_ids"])
+                    gate_means = []
+                    for start, end in spans[: len(history_paths)]:
+                        values = [
+                            module.last_gate[..., start:end, :].float().mean()
+                            for module in memory_bundle.modules
+                            if getattr(module, "last_gate", None) is not None
+                        ]
+                        gate_means.append(float(torch.stack(values).mean()) if values else None)
+                    memory_gate_means = gate_means
                 valid = (labels != -100).sum().clamp_min(1)
                 score = -output.loss * valid.to(output.loss.dtype) / valid
-                scored_group.append({**row, "score": float(score)})
+                scored_group.append({
+                    **row, "score": float(score),
+                    **({"memory_gate_means": memory_gate_means} if memory_gate_means is not None else {}),
+                })
             scored.append(scored_group)
     return scored
 
@@ -254,10 +306,14 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--checkpoint", help="Target projector checkpoint; omit for zero-residual base")
     parser.add_argument("--baseline-checkpoint", help="Optional baseline projector checkpoint")
+    parser.add_argument("--compare-zero", action="store_true", help="Compare against the zero-residual projector")
     parser.add_argument("--rank", type=int, default=8)
     parser.add_argument("--alpha", type=float, default=8.0)
     parser.add_argument("--target", choices=("k", "v", "both"), default="v")
     parser.add_argument("--last-n-layers", type=int, default=8)
+    parser.add_argument("--state-conditioned-gate", action="store_true")
+    parser.add_argument("--gated-layers", nargs="+", type=int)
+    parser.add_argument("--gate-rank", type=int, default=16)
     parser.add_argument("--max-pixels", type=int, default=100352)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-prefixes", type=int)
@@ -273,9 +329,15 @@ def main() -> None:
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         args.model, dtype=torch.bfloat16, device_map=args.device
     ).eval()
-    bundle = attach_kv_projectors(
-        model, args.rank, args.alpha, args.target, args.last_n_layers
-    )
+    if args.state_conditioned_gate:
+        bundle = attach_gated_kv_projectors(
+            model, args.rank, args.alpha, args.target,
+            layers=args.gated_layers, gate_rank=args.gate_rank,
+        )
+    else:
+        bundle = attach_kv_projectors(
+            model, args.rank, args.alpha, args.target, args.last_n_layers
+        )
     zero_state = {name: value.detach().clone() for name, value in bundle.modules.state_dict().items()}
     rows = load_counterfactual_jsonl(args.data)
     for row in rows:
@@ -289,10 +351,13 @@ def main() -> None:
     def evaluate(checkpoint: str | None) -> dict[str, Any]:
         _load_projector_state(bundle, checkpoint, zero_state, args.device)
         return summarize_policy_scores(
-            _score_groups(model, processor, groups, args.device, args.drop_history_index)
+            _score_groups(
+                model, processor, groups, args.device, args.drop_history_index,
+                memory_bundle=bundle if args.state_conditioned_gate else None,
+            )
         )
 
-    baseline = evaluate(args.baseline_checkpoint) if args.baseline_checkpoint else None
+    baseline = evaluate(args.baseline_checkpoint) if (args.baseline_checkpoint or args.compare_zero) else None
     target = evaluate(args.checkpoint)
     target_scored = target.pop("prefix_results")
     # Reconstruct the compact scored groups needed for the optional delta
@@ -307,13 +372,18 @@ def main() -> None:
         "data": args.data,
         "checkpoint": args.checkpoint,
         "baseline_checkpoint": args.baseline_checkpoint,
+        "compare_zero": args.compare_zero,
         "rank": args.rank,
         "alpha": args.alpha,
         "target": args.target,
         "last_n_layers": args.last_n_layers,
         "drop_history_index": args.drop_history_index,
+        "state_conditioned_gate": args.state_conditioned_gate,
+        "gated_layers": args.gated_layers,
         "evaluation": target,
     }
+    if args.state_conditioned_gate:
+        summary["memory_gate_summary"] = summarize_memory_gate_values(target_scored)
     if baseline is not None:
         baseline_results = baseline.pop("prefix_results")
         baseline_groups = [[
