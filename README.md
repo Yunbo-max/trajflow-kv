@@ -136,6 +136,19 @@ ONE; the other is an incorrect visual choice among unlabeled colored boxes.
 This is online cross-environment no-regression evidence, not a
 cross-environment return improvement.
 
+A second MiniWoB gate trains directly on 40 seeded random legal-click
+trajectories (19 successful) and evaluates 20 independent trajectories. The
+held-out success/failure score margin rises from `0.12792` at the shared
+AITW warm start to `0.13989` with return weighting, versus `0.12647` after
+shuffling returns and `0.13557` with successful-only action CE. On 30 unseen
+`click-color` episodes at the calibrated injection strength `alpha=16`, the
+warm start succeeds on `12/30`, shuffled return on `13/30`, and both return
+weighting and action CE on `14/30`. Return weighting improves two paired
+episodes without regressions, but does not beat action CE online. This passes
+the offline objective-specific sanity check, while the online result remains
+a weak positive and fails the objective-specificity gate; it is not evidence
+of broad cross-task superiority.
+
 The principal 20-epoch run is reproducible with:
 
 ```bash

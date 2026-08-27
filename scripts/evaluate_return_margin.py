@@ -62,9 +62,10 @@ def main() -> None:
                     loaded_image.size
                     if loaded_image else tuple(step.get("screen_size", (1000, 1000)))
                 )
-                content.append({"type": "text", "text": build_action_prompt(
+                prompt = step.get("prompt") or build_action_prompt(
                     trajectory["instruction"], step.get("history", []), inferred_size
-                )})
+                )
+                content.append({"type": "text", "text": prompt})
                 prompt_messages = [{"role": "user", "content": content}]
                 messages = prompt_messages + [{"role": "assistant", "content": [
                     {"type": "text", "text": step["action"]}

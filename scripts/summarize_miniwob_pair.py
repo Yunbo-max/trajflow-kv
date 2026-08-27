@@ -22,11 +22,10 @@ def main() -> None:
     parser.add_argument("--candidate", nargs="+", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
-    if len(args.baseline) != len(args.candidate):
-        parser.error("baseline and candidate file counts must match")
     base_rows, candidate_rows = [], []
-    for base_path, candidate_path in zip(args.baseline, args.candidate):
+    for base_path in args.baseline:
         base_rows.extend(json.loads(Path(base_path).read_text())["rows"])
+    for candidate_path in args.candidate:
         candidate_rows.extend(json.loads(Path(candidate_path).read_text())["rows"])
     base = {(row["task"], row["seed"]): row for row in base_rows}
     candidate = {(row["task"], row["seed"]): row for row in candidate_rows}

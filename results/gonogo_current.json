@@ -153,6 +153,25 @@
     "failure_audit": "Both arms fail click-button-sequence seed 403 because Playwright reports button TWO intercepting a click on overlapping button ONE; both also choose the wrong unlabeled colored box on click-color seed 415.",
     "interpretation": "Online cross-environment no-regression: the Android-trained KV residual preserves browser-task return, but changes no action, provides no success-rate gain, and very slightly decreases aggregate candidate-score margin."
   },
+  "miniwob_return_training_gate": {
+    "training_data": {"trajectories": 40, "successes": 19, "tasks": ["click-button", "click-button-sequence", "click-tab", "click-color"], "seeds": "501-510"},
+    "heldout_data": {"trajectories": 20, "successes": 5, "seeds": "511-515"},
+    "heldout_return_margin": {
+      "shared_aitw_warm_start": 0.1279193530,
+      "return_weighted": 0.1398944217,
+      "shuffled_return": 0.1264714572,
+      "successful_only_action_ce": 0.1355738173
+    },
+    "online_click_color_seeds_601_630_alpha_16": {
+      "shared_aitw_warm_start": "12/30",
+      "return_weighted": "14/30",
+      "shuffled_return": "13/30",
+      "successful_only_action_ce": "14/30",
+      "return_vs_warm_paired": {"improved": 2, "regressed": 0, "identical_action_episodes": 28},
+      "mean_top1_margin": {"warm": 0.0523772798, "return": 0.0542707813, "shuffled": 0.0525591362, "action_ce": 0.0483351204}
+    },
+    "interpretation": "The return objective passes the held-out offline specificity check and produces a small paired online gain over the shared warm start. It ties successful-only action CE online, so this 30-episode probe is a weak positive but does not establish return-specific or broad cross-task superiority."
+  },
   "online": {
     "earlier_open_app_pairs": {"baseline": "6/10", "return_kv": "7/10"},
     "system_task_free_form": "No successful learned-policy rollout observed, including alpha=8 and eight-step evaluations. The positive-only action auxiliary produced legal JSON (0 invalid actions) but repeated swipe-down for all eight Wi-Fi steps and returned 0.",

@@ -22,6 +22,7 @@ def main() -> None:
     parser.add_argument("--checkpoint")
     parser.add_argument("--tasks", nargs="+", default=["click-test", "click-button-sequence"])
     parser.add_argument("--seeds", nargs="+", type=int, default=[401, 402, 403])
+    parser.add_argument("--suite", choices=("paired24",))
     parser.add_argument("--max-steps", type=int, default=4)
     parser.add_argument("--miniwob-url", default="file:///root/miniwob-plusplus/miniwob/html/miniwob/")
     parser.add_argument("--output", required=True)
@@ -50,8 +51,19 @@ def main() -> None:
 
     episodes = []
     with torch.inference_mode():
-        for task in args.tasks:
-            for seed in args.seeds:
+        if args.suite == "paired24":
+            cases = (
+                [(task, seed, 3) for task in ("click-button", "click-button-sequence", "click-tab")
+                 for seed in (401, 402, 403)]
+                + [("click-checkboxes", seed, 8) for seed in range(404, 409)]
+                + [("click-option", seed, 8) for seed in range(409, 414)]
+                + [("click-color", seed, 1) for seed in range(414, 419)]
+            )
+        else:
+            cases = [
+                (task, seed, args.max_steps) for task in args.tasks for seed in args.seeds
+            ]
+        for task, seed, episode_max_steps in cases:
                 env = gym.make(f"browsergym/miniwob.{task}", headless=True)
                 trajectory = []
                 total_reward = 0.0
@@ -59,7 +71,7 @@ def main() -> None:
                     observation, _ = env.reset(seed=seed)
                     history = []
                     acted_bids: set[str] = set()
-                    for step in range(args.max_steps):
+                    for step in range(episode_max_steps):
                         candidates = exclude_acted_candidates(
                             clickable_candidates(observation), acted_bids
                         )
@@ -115,7 +127,9 @@ def main() -> None:
                 print(f"task={task} seed={seed} return={total_reward}")
     summary = {
         "checkpoint": args.checkpoint or "base",
-        "tasks": args.tasks, "seeds": args.seeds,
+        "tasks": sorted({row["task"] for row in episodes}),
+        "seeds": sorted({row["seed"] for row in episodes}),
+        "suite": args.suite,
         "episodes": len(episodes),
         "successes": sum(row["success"] for row in episodes),
         "success_rate": sum(row["success"] for row in episodes) / len(episodes),

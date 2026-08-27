@@ -134,7 +134,7 @@ def train_qwen(cfg):
                     loaded_image = Image.open(step["image"]).convert("RGB")
                     content.append({"type": "image", "image": loaded_image})
                 inferred_size = loaded_image.size if loaded_image else tuple(step.get("screen_size", (1000, 1000)))
-                prompt = build_action_prompt(
+                prompt = step.get("prompt") or build_action_prompt(
                     trajectory["instruction"], step.get("history", []), inferred_size
                 )
                 content.append({"type": "text", "text": prompt})
