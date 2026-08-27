@@ -184,6 +184,31 @@ The principal 20-epoch run is reproducible with:
 
 ## Reproducing the later phases
 
+### Same-prefix counterfactual TANGO
+
+The counterfactual data protocol keeps one JSONL row per candidate action at
+an immutable GUI prefix, with evaluator-provided `Q`, `V`, and `advantage=Q-V`.
+Generate the text-only delayed-consequence smoke data and train the Qwen K/V
+projector with the new path as follows:
+
+```bash
+.venv/bin/python -m trajflow_kv.tango_advantage \
+  --output data/toy/tango_counterfactual.jsonl \
+  --seeds 10 --horizon 6
+
+.venv/bin/python -m trajflow_kv.train \
+  --config configs/tango_counterfactual_qwen.yaml \
+  --counterfactual-data data/toy/tango_counterfactual.jsonl \
+  --objective tango \
+  --output-dir outputs/tango/counterfactual_qwen
+```
+
+`--objective` accepts `tango` (state-conditioned `Q-V` advantage),
+`global_return` (same-prefix normalized Q baseline), or `ce` (oracle highest-Q
+candidate control). This path scores every candidate under the same text
+prefix and temporarily hooks K/V activations; it does not create a hooked-KV
+dataset and leaves the existing trajectory `data_path` training unchanged.
+
 Build state-conditioned preference pairs and train the fork projector from a
 return checkpoint:
 

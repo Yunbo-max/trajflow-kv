@@ -15,10 +15,12 @@ from trajflow_kv.counterfactual import (
 )
 from trajflow_kv.tango_advantage import (
     action_ce_loss,
+    counterfactual_objective_loss,
     global_return_loss,
     tango_advantage_loss,
     train_tabular_counterfactual,
 )
+from trajflow_kv.train import _counterfactual_groups, _counterfactual_prompt
 
 
 def _rows_for(family: str):
@@ -107,3 +109,41 @@ def test_tabular_runner_exposes_tango_global_and_ce_interfaces():
         model, history = train_tabular_counterfactual(rows, objective=objective, epochs=2)
         assert model.logits.weight.shape[0] > 0
         assert len(history) == 2
+
+
+def test_counterfactual_group_objectives_use_same_prefix_candidates():
+    rows = [
+        {"prefix_id": "p", "action": "bad", "Q": 0.0, "advantage": -0.5},
+        {"prefix_id": "p", "action": "good", "Q": 1.0, "advantage": 0.5},
+    ]
+    scores = torch.tensor([0.0, 0.0], requires_grad=True)
+    tango = counterfactual_objective_loss(scores, rows, objective="tango")
+    tango.backward()
+    # Increasing the good candidate score lowers the policy loss.
+    assert scores.grad[1] < 0
+    ce_scores = torch.tensor([0.0, 0.0], requires_grad=True)
+    ce = counterfactual_objective_loss(ce_scores, rows, objective="ce")
+    ce.backward()
+    assert ce_scores.grad[1] < 0
+    with pytest.raises(ValueError):
+        counterfactual_objective_loss(scores.detach(), rows, objective="unknown")
+
+
+def test_qwen_counterfactual_rows_are_grouped_without_losing_candidates():
+    rows = [
+        {
+            "prefix_id": "p",
+            "action": "good",
+            "candidate_actions": ["bad", "good"],
+            "prefix": {"history": [], "observation": {"screen": "choose"}},
+        },
+        {
+            "prefix_id": "p",
+            "action": "bad",
+            "candidate_actions": ["bad", "good"],
+            "prefix": {"history": [], "observation": {"screen": "choose"}},
+        },
+    ]
+    groups = _counterfactual_groups(rows)
+    assert [[row["action"] for row in group] for group in groups] == [["bad", "good"]]
+    assert "Candidates" in _counterfactual_prompt(rows[0])

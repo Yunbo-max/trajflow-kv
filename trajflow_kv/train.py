@@ -10,9 +10,11 @@ import yaml
 from torch import nn
 
 from .data import load_jsonl
+from .counterfactual import load_counterfactual_jsonl
 from .objective import normalized_advantages, shuffle_within_tasks, trajectory_policy_loss
 from .projector import attach_kv_projectors
 from .training_controls import controlled_returns, remove_prompt_history, select_trajectory_steps
+from .tango_advantage import counterfactual_objective_loss
 
 
 class ToyKVPolicy(nn.Module):
@@ -192,6 +194,162 @@ def train_qwen(cfg):
     return model, bundle, history
 
 
+def _counterfactual_prompt(row: dict) -> str:
+    """Render a text-only same-prefix prompt for a counterfactual row.
+
+    The toy benchmark intentionally has no screenshot dependency.  Real
+    counterfactual collectors may provide ``prompt`` or an observation with a
+    screen/accessibility description; both are accepted here.
+    """
+    if row.get("prompt"):
+        return str(row["prompt"])
+    prefix = row.get("prefix") or {}
+    observation = prefix.get("observation") or {}
+    screen = observation.get("screen", prefix.get("screen", ""))
+    history = prefix.get("history", [])
+    candidates = row.get("candidate_actions", [row.get("action")])
+    return (
+        "You are a GUI policy. Choose exactly one action from the candidate list "
+        "and return only that action, with no explanation.\n"
+        f"Task: {row.get('instruction', '')}\n"
+        f"Observation: {screen}\n"
+        f"History: {json.dumps(history, ensure_ascii=False)}\n"
+        f"Candidates: {json.dumps([str(item) for item in candidates], ensure_ascii=False)}"
+    )
+
+
+def _counterfactual_groups(rows: list[dict]) -> list[list[dict]]:
+    """Group rows by immutable prefix and put candidates in stable order."""
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        prefix_id = str(row.get("prefix_id", ""))
+        if not prefix_id:
+            raise ValueError("counterfactual rows require prefix_id")
+        groups.setdefault(prefix_id, []).append(row)
+    ordered: list[list[dict]] = []
+    for prefix_id, group in groups.items():
+        candidate_actions = group[0].get("candidate_actions")
+        if candidate_actions is None:
+            candidate_actions = [row["action"] for row in group]
+        by_action = {str(row["action"]): row for row in group}
+        missing = [str(action) for action in candidate_actions if str(action) not in by_action]
+        if missing:
+            raise ValueError(f"prefix {prefix_id} is missing candidate rows: {missing}")
+        ordered.append([by_action[str(action)] for action in candidate_actions])
+    return ordered
+
+
+def train_qwen_counterfactual(cfg):
+    """Train K/V projectors on same-prefix counterfactual candidate rows.
+
+    This is intentionally a separate path from trajectory JSONL training.  It
+    scores every legal candidate under the *same* text prefix, then applies
+    the requested TANGO (Q-V), global-return, or oracle-CE objective.  Existing
+    ``data_path`` training remains unchanged when ``counterfactual_data`` is
+    absent.
+    """
+    from PIL import Image
+    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+
+    objective = cfg.get("objective", "tango")
+    if objective not in {"tango", "global_return", "ce"}:
+        raise ValueError("objective must be tango, global_return, or ce")
+    device = cfg["device"]
+    processor = AutoProcessor.from_pretrained(cfg["model_path"], max_pixels=cfg["max_pixels"])
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        cfg["model_path"], dtype=torch.bfloat16, device_map=device
+    )
+    for parameter in model.parameters():
+        parameter.requires_grad_(False)
+    model.config.use_cache = False
+    model.gradient_checkpointing_enable()
+    bundle = attach_kv_projectors(
+        model, cfg["rank"], cfg["alpha"], cfg["target"], cfg.get("last_n_layers")
+    )
+    projector_checkpoint = cfg.get("projector_checkpoint")
+    if projector_checkpoint:
+        bundle.modules.load_state_dict(
+            torch.load(projector_checkpoint, map_location=device, weights_only=True)
+        )
+    optimizer = torch.optim.AdamW(bundle.modules.parameters(), lr=cfg["lr"])
+    rows = load_counterfactual_jsonl(cfg["counterfactual_data"])
+    groups = _counterfactual_groups(rows)
+    if not groups:
+        raise ValueError("counterfactual_data must contain at least one prefix")
+    max_rows = cfg.get("max_counterfactual_rows")
+    if max_rows is not None and max_rows < len(rows):
+        # Never truncate inside a prefix: all candidates are needed to form a
+        # valid same-prefix counterfactual advantage.
+        selected_groups = []
+        selected_rows = 0
+        for group in groups:
+            if selected_groups and selected_rows + len(group) > int(max_rows):
+                break
+            selected_groups.append(group)
+            selected_rows += len(group)
+        groups = selected_groups
+        rows = [row for group in groups for row in group]
+    accumulation = int(cfg.get("gradient_accumulation_steps", 1))
+    history = [{
+        "event": "setup",
+        "objective": objective,
+        "counterfactual_data": cfg["counterfactual_data"],
+        "prefixes": len(groups),
+        "rows": len(rows),
+        "hooked_modules": len(bundle.names),
+        "trainable_parameters": sum(p.numel() for p in bundle.modules.parameters()),
+        "projector_checkpoint": projector_checkpoint,
+    }]
+    optimizer.zero_grad(set_to_none=True)
+
+    def action_score(row: dict, action: object) -> torch.Tensor:
+        content = []
+        image_path = row.get("image") or (row.get("prefix") or {}).get("image")
+        loaded_image = Image.open(image_path).convert("RGB") if image_path else None
+        if loaded_image is not None:
+            content.append({"type": "image", "image": loaded_image})
+        content.append({"type": "text", "text": _counterfactual_prompt(row)})
+        user = {"role": "user", "content": content}
+        assistant = {"role": "assistant", "content": [{"type": "text", "text": str(action)}]}
+        prompt_batch = processor.apply_chat_template(
+            [user], tokenize=True, add_generation_prompt=True,
+            return_dict=True, return_tensors="pt",
+        )
+        batch = processor.apply_chat_template(
+            [user, assistant], tokenize=True,
+            return_dict=True, return_tensors="pt",
+        ).to(device)
+        labels = batch["input_ids"].clone()
+        labels[:, :prompt_batch["input_ids"].shape[1]] = -100
+        output = model(**batch, labels=labels, use_cache=False)
+        valid = (labels != -100).sum().clamp_min(1)
+        # Mean token log-prob is consistent with existing candidate ranking
+        # and prevents longer JSON actions from winning by length alone.
+        return -output.loss * valid.to(output.loss.dtype) / valid
+
+    for epoch in range(int(cfg["epochs"])):
+        for group_index, group in enumerate(groups):
+            scores = torch.stack([action_score(row, row["action"]) for row in group])
+            loss = counterfactual_objective_loss(scores, group, objective=objective)
+            energy = bundle.energy()
+            orthogonality = bundle.orthogonality_loss()
+            loss = loss + cfg.get("lambda_energy", 0.0) * energy
+            loss = loss + cfg.get("lambda_orth", 0.0) * orthogonality
+            (loss / accumulation).backward()
+            if (group_index + 1) % accumulation == 0 or group_index + 1 == len(groups):
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+            history.append({
+                "epoch": epoch,
+                "prefix": group[0].get("prefix_id"),
+                "objective": objective,
+                "loss": float(loss.detach()),
+                "energy": float(energy.detach()),
+                "orthogonality": float(orthogonality.detach()),
+            })
+    return model, bundle, history
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -199,6 +357,8 @@ def main():
     parser.add_argument("--data-path")
     parser.add_argument("--output-dir")
     parser.add_argument("--projector-checkpoint")
+    parser.add_argument("--counterfactual-data")
+    parser.add_argument("--objective", choices=("tango", "global_return", "ce"))
     parser.add_argument("--no-projector-checkpoint", action="store_true")
     parser.add_argument("--target", choices=("k", "v", "both"))
     parser.add_argument("--rank", type=int)
@@ -234,6 +394,8 @@ def main():
         cfg["projector_checkpoint"] = args.projector_checkpoint
     if args.no_projector_checkpoint:
         cfg["projector_checkpoint"] = None
+    if args.counterfactual_data is not None:
+        cfg["counterfactual_data"] = args.counterfactual_data
     if args.positive_action_only:
         cfg["positive_action_only"] = True
     if args.remove_history:
@@ -246,8 +408,13 @@ def main():
         value = getattr(args, key)
         if value is not None:
             cfg[key] = value
+    if args.objective is not None:
+        cfg["objective"] = args.objective
     random.seed(cfg["seed"]); torch.manual_seed(cfg["seed"])
-    model, bundle, history = train_toy(cfg) if cfg["toy"] else train_qwen(cfg)
+    if cfg.get("counterfactual_data"):
+        model, bundle, history = train_qwen_counterfactual(cfg)
+    else:
+        model, bundle, history = train_toy(cfg) if cfg["toy"] else train_qwen(cfg)
     output = Path(cfg["output_dir"]); output.mkdir(parents=True, exist_ok=True)
     torch.save(bundle.modules.state_dict(), output / "kv_projectors.pt")
     (output / "metrics.json").write_text(json.dumps(history, indent=2))

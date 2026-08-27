@@ -55,6 +55,59 @@ def candidate_advantages_from_rows(rows: list[dict], device: str | torch.device 
     return torch.tensor([float(row["advantage"]) for row in rows], dtype=torch.float32, device=device)
 
 
+def counterfactual_objective_loss(
+    action_logprobs: torch.Tensor,
+    rows: list[dict],
+    *,
+    objective: str = "tango",
+) -> torch.Tensor:
+    """Compute one same-prefix candidate-group objective.
+
+    ``action_logprobs`` must follow the candidate order in ``rows``.  This
+    small tensor-only function is shared by the Qwen hook trainer and tests,
+    keeping the policy objective independent from the tokenizer/model.  For
+    the CE control, an explicit ``target_action``/``target_index`` in a row is
+    honored; otherwise the highest-Q candidate is the oracle label supplied by
+    the counterfactual evaluator.
+    """
+    if objective not in {"tango", "global_return", "ce"}:
+        raise ValueError("objective must be tango, global_return, or ce")
+    if action_logprobs.ndim != 1 or action_logprobs.shape[0] != len(rows):
+        raise ValueError("one action log-probability required per candidate row")
+    if not rows:
+        raise ValueError("rows must not be empty")
+    if objective == "tango":
+        return tango_advantage_loss(
+            action_logprobs,
+            candidate_advantages_from_rows(rows, action_logprobs.device),
+        )
+    if objective == "global_return":
+        returns = torch.tensor(
+            [float(row["Q"]) for row in rows],
+            dtype=action_logprobs.dtype,
+            device=action_logprobs.device,
+        )
+        # A prefix is the task/state group for this objective.  The baseline
+        # is deliberately computed over the same candidate set, while TANGO
+        # consumes the evaluator's explicit Q-V advantage.
+        advantages = normalized_advantages(returns, [str(rows[0].get("prefix_id", "prefix"))] * len(rows))
+        return trajectory_policy_loss(action_logprobs, advantages)
+
+    target = rows[0].get("target_index")
+    if target is None and rows[0].get("target_action") is not None:
+        target_action = str(rows[0]["target_action"])
+        target = next(
+            (index for index, row in enumerate(rows) if str(row["action"]) == target_action),
+            None,
+        )
+    if target is None:
+        target = max(range(len(rows)), key=lambda index: float(rows[index]["Q"]))
+    target = int(target)
+    if not 0 <= target < len(rows):
+        raise ValueError("target_index is outside the candidate group")
+    return action_ce_loss(action_logprobs[None, :], torch.tensor([target], device=action_logprobs.device))
+
+
 class TabularPrefixPolicy(nn.Module):
     """Tiny prefix-conditioned policy used by the no-download CLI smoke run."""
 
