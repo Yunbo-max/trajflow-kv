@@ -130,6 +130,32 @@ def critical_prefix_rows(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]
     return [row for group in groups if _critical_prefix(group) for row in group]
 
 
+def balanced_memory_prefix_rows(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pair each critical prefix with one same-family all-zero memory negative."""
+    annotated = annotate_credit_ground_truth(rows)
+    groups = group_counterfactual_rows(annotated)
+    critical_by_family: dict[str, list[list[dict[str, Any]]]] = defaultdict(list)
+    negative_by_family: dict[str, list[list[dict[str, Any]]]] = defaultdict(list)
+    for group in groups:
+        family = str(group[0].get("task_family", "unknown"))
+        if _critical_prefix(group):
+            critical_by_family[family].append(group)
+            continue
+        history = group[0].get("history_images", [])
+        advantages = group[0].get("memory_advantages", [])
+        if history and advantages and len(history) == len(advantages) and not any(advantages):
+            negative_by_family[family].append(group)
+    selected: list[list[dict[str, Any]]] = []
+    for family in sorted(critical_by_family):
+        positives = critical_by_family[family]
+        negatives = negative_by_family[family]
+        if len(negatives) < len(positives):
+            raise ValueError(f"not enough memory-negative prefixes for {family}")
+        selected.extend(positives)
+        selected.extend(negatives[: len(positives)])
+    return [row for group in selected for row in group]
+
+
 def _oracle_text(row: dict[str, Any]) -> str | None:
     family = str(row.get("task_family", ""))
     state = (row.get("prefix") or {}).get("state") or {}
@@ -232,6 +258,7 @@ def prepare_diagnostic_files(
     *,
     critical_output: str | Path | None = None,
     history_oracle_output: str | Path | None = None,
+    balanced_memory_output: str | Path | None = None,
     summary_output: str | Path | None = None,
 ) -> dict[str, Any]:
     """Create requested P0 diagnostic JSONL files and return their summary."""
@@ -246,9 +273,14 @@ def prepare_diagnostic_files(
         oracle = add_history_oracle(rows)
         summary["history_oracle_output"] = str(history_oracle_output)
         summary["history_oracle_rows"] = write_counterfactual_jsonl(oracle, history_oracle_output)
+    if balanced_memory_output is not None:
+        balanced = balanced_memory_prefix_rows(rows)
+        summary["balanced_memory_output"] = str(balanced_memory_output)
+        summary["balanced_memory_rows"] = write_counterfactual_jsonl(
+            balanced, balanced_memory_output
+        )
     if summary_output is not None:
         destination = Path(summary_output)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return summary
-

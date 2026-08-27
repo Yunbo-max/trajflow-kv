@@ -3,6 +3,7 @@ import json
 from trajflow_kv.credit_diagnostics import (
     add_history_oracle,
     annotate_credit_ground_truth,
+    balanced_memory_prefix_rows,
     critical_prefix_rows,
     group_counterfactual_rows,
     summarize_credit_rows,
@@ -61,3 +62,14 @@ def test_summary_reports_group_counts_and_memory_sources():
     assert summary["noncritical_prefixes"] > 0
     assert summary["critical_rows"] + summary["noncritical_rows"] == summary["rows"]
     assert summary["memory_source_prefixes"]["cue"] == 1
+
+
+def test_balanced_memory_rows_pair_critical_and_zero_advantage_prefixes():
+    rows = balanced_memory_prefix_rows(_rows())
+    groups = group_counterfactual_rows(rows)
+    critical = [group for group in groups if group[0]["critical_prefix"]]
+    negatives = [group for group in groups if group[0]["noncritical_prefix"]]
+    assert len(critical) == len(negatives)
+    assert len(critical) >= 2
+    assert all(group[0]["history_images"] for group in negatives)
+    assert all(not any(group[0]["memory_advantages"]) for group in negatives)

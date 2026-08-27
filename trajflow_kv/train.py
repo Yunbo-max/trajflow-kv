@@ -8,7 +8,9 @@ from pathlib import Path
 import torch
 import yaml
 from torch import nn
+from torch.nn import functional as F
 
+from .causal_ablation import vision_token_spans
 from .data import load_jsonl
 from .counterfactual import load_counterfactual_jsonl
 from .objective import normalized_advantages, shuffle_within_tasks, trajectory_policy_loss
@@ -312,7 +314,7 @@ def train_qwen_counterfactual(cfg):
     }]
     optimizer.zero_grad(set_to_none=True)
 
-    def action_score(row: dict, action: object) -> torch.Tensor:
+    def action_score(row: dict, action: object) -> tuple[torch.Tensor, torch.Tensor | None]:
         content = []
         for history_image_path in row.get("history_images", []) or (row.get("prefix") or {}).get("history_images", []):
             history_image = Image.open(history_image_path).convert("RGB")
@@ -346,15 +348,38 @@ def train_qwen_counterfactual(cfg):
             output = model(**batch, labels=labels, use_cache=False)
         finally:
             bundle.clear_context()
+        memory_gates = None
+        if cfg.get("state_conditioned_gate") and history_count:
+            spans = vision_token_spans(batch["input_ids"])
+            gate_values = []
+            for start, end in spans[:history_count]:
+                values = [
+                    module.last_gate[..., start:end, :].float().mean()
+                    for module in bundle.modules
+                    if getattr(module, "last_gate", None) is not None
+                ]
+                gate_values.append(torch.stack(values).mean())
+            memory_gates = torch.stack(gate_values) if gate_values else None
         valid = (labels != -100).sum().clamp_min(1)
         # Mean token log-prob is consistent with existing candidate ranking
         # and prevents longer JSON actions from winning by length alone.
-        return -output.loss * valid.to(output.loss.dtype) / valid
+        return -output.loss * valid.to(output.loss.dtype) / valid, memory_gates
 
     for epoch in range(int(cfg["epochs"])):
         for group_index, group in enumerate(groups):
-            scores = torch.stack([action_score(row, row["action"]) for row in group])
+            scored = [action_score(row, row["action"]) for row in group]
+            scores = torch.stack([item[0] for item in scored])
             loss = counterfactual_objective_loss(scores, group, objective=objective)
+            memory_loss = torch.zeros((), device=device)
+            targets = group[0].get("memory_advantages", [])
+            if cfg.get("state_conditioned_gate") and targets and scored[0][1] is not None:
+                target_tensor = torch.tensor(targets, device=device, dtype=torch.float32)
+                if target_tensor.shape != scored[0][1].shape:
+                    raise ValueError("memory advantage count does not match history gate count")
+                memory_loss = F.binary_cross_entropy(
+                    scored[0][1].float().clamp(1e-6, 1 - 1e-6), target_tensor
+                )
+                loss = loss + float(cfg.get("lambda_memory", 0.0)) * memory_loss
             energy = bundle.energy()
             orthogonality = bundle.orthogonality_loss()
             loss = loss + cfg.get("lambda_energy", 0.0) * energy
@@ -370,6 +395,7 @@ def train_qwen_counterfactual(cfg):
                 "loss": float(loss.detach()),
                 "energy": float(energy.detach()),
                 "orthogonality": float(orthogonality.detach()),
+                "memory_loss": float(memory_loss.detach()),
             })
     return model, bundle, history
 

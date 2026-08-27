@@ -68,6 +68,10 @@ class VisualDelayedTask(DelayedConsequenceTask):
     def optimal_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
         return ()
 
+    def memory_advantages(self, state: dict[str, Any], history_count: int) -> tuple[float, ...]:
+        """Ground-truth memory-block advantage for controlled diagnostics."""
+        return (0.0,) * history_count
+
     def render_screenshot(self, state: dict[str, Any], path: str | Path) -> None:
         raise NotImplementedError
 
@@ -123,6 +127,12 @@ class DistractorCreditTask(VisualDelayedTask):
         if state["phase"] == "submit" and state.get("choice") == state.get("target"):
             return ("submit",)
         return tuple(self.available_actions(state)) if state["phase"] in {"x", "y"} else ()
+
+    def memory_advantages(self, state: dict[str, Any], history_count: int) -> tuple[float, ...]:
+        values = [0.0] * history_count
+        if state["phase"] == "fork" and values:
+            values[0] = 1.0
+        return tuple(values)
 
     def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
         state = self.clone(state)
@@ -223,6 +233,16 @@ class HiddenMemoryTask(VisualDelayedTask):
             return ("submit",)
         return tuple(self.available_actions(state)) if state["phase"] in {"cue", "distractor"} else ()
 
+    def memory_advantages(self, state: dict[str, Any], history_count: int) -> tuple[float, ...]:
+        values = [0.0] * history_count
+        # The cue is already useful on the harmless intervening screen because
+        # it determines a later choice, even though the current action itself
+        # is not critical.  This is precisely why action-critical labels are
+        # not valid substitutes for memory advantage.
+        if state["phase"] in {"distractor", "choose"} and values:
+            values[0] = 1.0
+        return tuple(values)
+
     def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
         state = self.clone(state)
         state["history"].append(action)
@@ -313,11 +333,12 @@ def build_visual_counterfactual_dataset(
                     # Include observations that preceded the current decision,
                     # including the initial cue screenshot.  The current
                     # screenshot remains in ``image`` and is not duplicated.
-                    history_path = destination / (
-                        f"{task.task_family}_s{seed}_{prefix_id.rsplit('-', 1)[-1]}_history0.png"
-                    )
-                    task.render_screenshot(replay_state, history_path)
-                    history_images.append(str(history_path))
+                    if prefix_history:
+                        history_path = destination / (
+                            f"{task.task_family}_s{seed}_{prefix_id.rsplit('-', 1)[-1]}_history0.png"
+                        )
+                        task.render_screenshot(replay_state, history_path)
+                        history_images.append(str(history_path))
                     for history_index, history_action in enumerate(prefix_history, start=1):
                         replay_state, _ = task.step(replay_state, str(history_action))
                         # The final replay state is the current screenshot and
@@ -337,12 +358,16 @@ def build_visual_counterfactual_dataset(
                 observation = row["prefix"]["observation"]
                 critical_actions = list(task.critical_actions(row["prefix"]["state"]))
                 optimal_actions = list(task.optimal_actions(row["prefix"]["state"]))
+                memory_advantages = list(
+                    task.memory_advantages(row["prefix"]["state"], len(history_images))
+                )
                 row.update(
                     benchmark=task.benchmark,
                     visual=True,
                     image=str(image_path),
                     screenshot_path=str(image_path),
                     history_images=list(history_images),
+                    memory_advantages=memory_advantages,
                     critical_step=bool(critical_actions),
                     critical_actions=critical_actions,
                     optimal_actions=optimal_actions,
@@ -355,6 +380,7 @@ def build_visual_counterfactual_dataset(
                 row["prefix"]["image"] = str(image_path)
                 row["prefix"]["screenshot_path"] = str(image_path)
                 row["prefix"]["history_images"] = list(history_images)
+                row["prefix"]["memory_advantages"] = memory_advantages
                 row["prefix"]["critical_step"] = bool(critical_actions)
                 row["prefix"]["critical_actions"] = critical_actions
                 row["prefix"]["optimal_actions"] = optimal_actions

@@ -42,6 +42,7 @@ def test_hidden_memory_hides_cue_in_choice_screenshot_and_executes(tmp_path):
     # The delayed cue is available as an earlier visual observation, while
     # the current choice screenshot intentionally hides it.
     assert choose[0]["history_images"]
+    assert choose[0]["memory_advantages"] == [1.0, 0.0]
     assert all(Image.open(path).size == (960, 600) for path in choose[0]["history_images"])
     image_path = choose[0]["image"]
     assert Image.open(image_path).size == (960, 600)
@@ -65,3 +66,5 @@ def test_visual_rows_roundtrip_existing_counterfactual_schema(tmp_path):
     assert len(loaded) == len(rows)
     assert {row["task_family"] for row in loaded} == {"hidden_memory"}
     assert all(json.loads(json.dumps(row["prefix"]))["screenshot_path"] for row in loaded)
+    initial = next(row for row in loaded if not row["prefix"]["history"])
+    assert initial["history_images"] == []

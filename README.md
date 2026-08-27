@@ -274,6 +274,17 @@ projector's `3.41` to `0.01475` (about 231x). Its cue/distractor mean gates are
 `0.1727/0.1508`, so localization is directionally correct but still weak; this
 is a stability/mechanism result, not yet a policy-gain result.
 
+Explicit block-level supervision is tracked in
+[`results/tango_memory_advantage_pilot20.json`](results/tango_memory_advantage_pilot20.json).
+Five critical-only epochs expand the hidden cue/distractor gate gap to `0.443`
+(`0.961/0.518`) and raise aggregate candidate Top-1 from `0.9524` to `1.00`,
+while critical accuracy remains saturated at `1.00`. A deliberately naive
+control that labels every non-critical *action* prefix as zero memory advantage
+collapses the gate gap to `0.0083`. This negative control matters: a memory
+block may be essential for a later fork even when the current action is
+harmless. Consequently, the next training split must use counterfactual
+`Q(M)-Q(M^-j)` targets rather than action-critical labels.
+
 Build state-conditioned preference pairs and train the fork projector from a
 return checkpoint:
 
