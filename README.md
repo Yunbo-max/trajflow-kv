@@ -43,6 +43,13 @@ long-press menu under software TCG. This is retained as a failed pair, not a
 cross-task success; it also leaves policy error and emulator input timing
 confounded until the run can be repeated with hardware virtualization.
 
+Cold-booting the software guest did not resolve this: the formerly successful
+scripted `swipe/swipe/click(260,200)/click(870,920)` acceptance sequence also
+returned zero, with `wifi_on=1`. The ActivityController log contains ANRs from
+SystemUI, network stack, Bluetooth, `system_server`, phone, and other services;
+a direct ADB tap independently surfaced a system-not-responding dialog. New
+online claims must therefore pass the committed KVM/health preflight first.
+
 A lightweight screenshot-conditioned state router is also included. On the
 current independent system-task split it reaches `5/6` action-type accuracy
 (`3/3` on click states). Its cross-task online result is still pending because
@@ -357,6 +364,26 @@ On the reference RTX A4000 container, first boot took roughly 25 minutes.
 Native AndroidWorld initialization then returned a 1080x2400 screenshot in
 15.4 seconds. A real `ContactsAddContact` initialize/score/teardown cycle and
 a Qwen + KV checkpoint rollout were both verified.
+
+Software TCG remains useful for API smoke tests but is no longer accepted for
+the multi-seed evidence gate. On a KVM-capable host, run the preflight and
+paired gate as follows:
+
+```bash
+.venv/bin/python scripts/preflight_androidworld.py --require-kvm \
+  --output outputs/gonogo/androidworld_preflight.json
+
+.venv/bin/python scripts/run_paired_online_gate.py \
+  --task SystemWifiTurnOff --task-index 0 --rollouts 3 --seed 301 \
+  --max-steps 4 \
+  --checkpoint outputs/gonogo/return_fork_click_e3_coord_e2/kv_projectors.pt \
+  --state-router-checkpoint outputs/gonogo/state_router64_taskcond_s17/state_router.pt \
+  --output-dir outputs/gonogo/wifi_kvm_gate_s301
+```
+
+The gate uses the same seeds and structured policy in both arms and repeats
+preflight between Base and KV. This prevents a guest destabilized by the Base
+arm from silently contaminating only the KV arm.
 
 To exercise the exact return path without an emulator, create a small mixed
 fixture from the downloaded sample:

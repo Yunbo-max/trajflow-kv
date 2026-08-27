@@ -148,6 +148,7 @@
       "combined": {"baseline": "0/4", "return_fork_coordinate_kv": "4/4"}
     },
     "wifi_probe": "A fresh deterministic seed-301 pair with the 64x64 task-conditioned router remained baseline 0/1 versus KV 0/1 (zero invalid actions). Base emitted swipe/click/click/swipe; KV emitted swipe/click/swipe/click. The first swipe rendered the Internet tile correctly, but the subsequent nominal tap returned to the launcher with a long-press menu under software TCG, so this run does not separate policy error from emulator input-timing failure.",
+    "software_emulator_acceptance": "After a cold boot, the previously verified scripted sequence swipe/swipe/click(260,200)/click(870,920) also returned 0 with wifi_on=1. The emulator ActivityController log records ANRs in SystemUI, networkstack, Bluetooth, system_server, phone, and other services. A direct ADB tap reproduced a system-not-responding dialog. Stable KVM is now a mandatory preflight condition for further multi-seed claims.",
     "go_no_go": "Single-task online gate passed reproducibly; cross-task gate remains pending. Do not claim broad end-to-end success until a learned state router or equivalent structured policy passes Wi-Fi and additional tasks."
   }
 }
