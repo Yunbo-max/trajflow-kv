@@ -26,3 +26,4 @@ include = ["trajflow_kv*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

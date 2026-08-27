@@ -209,6 +209,46 @@ candidate control). This path scores every candidate under the same text
 prefix and temporarily hooks K/V activations; it does not create a hooked-KV
 dataset and leaves the existing trajectory `data_path` training unchanged.
 
+### Visual delayed-consequence pilot
+
+The screenshot-backed pilot is a deterministic, emulator-free GUI benchmark
+for the return-to-credit gate. `distractor_credit` places harmless X/Y actions
+around a hidden A/B fork; `hidden_memory` shows a color cue that disappears
+before the choice. Each candidate row keeps the existing
+`tango.counterfactual.v1` fields and adds `image`, `critical_step`,
+`critical_actions`, `optimal_actions`, and `is_critical_action`. The generated
+PNG is the VLM observation, while the task state machine remains directly
+executable for online replay.
+
+Generate a small pilot (screenshots are intentionally ignored by git):
+
+```bash
+.venv/bin/python scripts/generate_visual_delayed.py \
+  --output data/visual_delayed/pilot.jsonl \
+  --image-dir data/visual_delayed/images \
+  --seeds 10 --horizon 8 --aggregation mean
+```
+
+Use the rows with the existing `--counterfactual-data` trainer after verifying
+same-prefix fork accuracy. This controlled pilot is intended before spending
+compute on AndroidWorld or browser rollouts.
+
+Score every visual candidate with Qwen under the same prefix. The optional
+baseline checkpoint is evaluated in the same process, and the output includes
+candidate top-1, critical-fork accuracy, per-family results, and non-critical
+score changes:
+
+```bash
+.venv/bin/python scripts/evaluate_counterfactual_qwen.py \
+  --data data/visual_delayed/pilot.jsonl \
+  --checkpoint outputs/tango/counterfactual_qwen/kv_projectors.pt \
+  --baseline-checkpoint outputs/gonogo/initial_v_l8/kv_projectors.pt \
+  --output results/visual_delayed_qwen.json
+```
+
+Omit `--checkpoint` to evaluate the zero-residual base VLM. This is an offline
+counterfactual ranking diagnostic; it is not an online GUI success result.
+
 Build state-conditioned preference pairs and train the fork projector from a
 return checkpoint:
 
