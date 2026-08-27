@@ -261,6 +261,13 @@ pilot, so this is a protocol/backbone diagnostic rather than evidence that
 TANGO beats CE. Their large non-critical score shifts also motivate the next
 state-conditioned memory gate and causal KV-block ablation.
 
+As a cheap visual-provenance diagnostic, the same 60 critical prefixes score
+`1.00` with full history, `0.45` after dropping history image 0 (the cue), and
+`1.00` after dropping history image 1 (a later harmless observation). This
+shows that the corrected benchmark contains a real causal visual-memory
+signal, while still not claiming that the current fixed projector has learned
+that signal robustly.
+
 Build state-conditioned preference pairs and train the fork projector from a
 return checkpoint:
 

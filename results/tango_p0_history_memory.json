@@ -30,5 +30,12 @@
     "ce_noncritical_mean_delta": -1.7134124942914104,
     "ce_noncritical_mean_absolute_delta": 1.9907101297807512,
     "interpretation": "Supplying visual history restores critical decisions, but one-epoch projector training saturates both CE and TANGO and causes large non-critical score shifts; this is a protocol/mechanism diagnostic, not an online win."
+  },
+  "causal_visual_history_ablation": {
+    "data": "critical_only.jsonl (60 prefixes)",
+    "warm_full_history_critical_fork_accuracy": 1.0,
+    "warm_drop_history_index_0_critical_fork_accuracy": 0.45,
+    "warm_drop_history_index_1_critical_fork_accuracy": 1.0,
+    "interpretation": "Removing the earliest cue screenshot destroys the delayed decision, while removing the later harmless history screenshot does not. This is visual-evidence provenance evidence; decoder-KV block ablation is the next step."
   }
 }

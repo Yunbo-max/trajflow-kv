@@ -196,6 +196,7 @@ def _score_groups(
     processor: Any,
     groups: list[list[dict[str, Any]]],
     device: str,
+    drop_history_index: int | None = None,
 ) -> list[list[dict[str, Any]]]:
     scored: list[list[dict[str, Any]]] = []
     with torch.inference_mode():
@@ -203,7 +204,13 @@ def _score_groups(
             scored_group: list[dict[str, Any]] = []
             for row in group:
                 history_paths = []
-                for history_image in row.get("history_images", []) or (row.get("prefix") or {}).get("history_images", []):
+                history_images = row.get("history_images", []) or (row.get("prefix") or {}).get("history_images", [])
+                if drop_history_index is not None:
+                    history_images = [
+                        image for index, image in enumerate(history_images)
+                        if index != drop_history_index
+                    ]
+                for history_image in history_images:
                     history_path = Path(str(history_image))
                     if not history_path.exists():
                         data_path = row.get("_data_path")
@@ -254,6 +261,10 @@ def main() -> None:
     parser.add_argument("--max-pixels", type=int, default=100352)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-prefixes", type=int)
+    parser.add_argument(
+        "--drop-history-index", type=int,
+        help="Omit one prior screenshot from every prefix for causal memory ablation.",
+    )
     args = parser.parse_args()
 
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
@@ -277,7 +288,9 @@ def main() -> None:
 
     def evaluate(checkpoint: str | None) -> dict[str, Any]:
         _load_projector_state(bundle, checkpoint, zero_state, args.device)
-        return summarize_policy_scores(_score_groups(model, processor, groups, args.device))
+        return summarize_policy_scores(
+            _score_groups(model, processor, groups, args.device, args.drop_history_index)
+        )
 
     baseline = evaluate(args.baseline_checkpoint) if args.baseline_checkpoint else None
     target = evaluate(args.checkpoint)
@@ -298,6 +311,7 @@ def main() -> None:
         "alpha": args.alpha,
         "target": args.target,
         "last_n_layers": args.last_n_layers,
+        "drop_history_index": args.drop_history_index,
         "evaluation": target,
     }
     if baseline is not None:
