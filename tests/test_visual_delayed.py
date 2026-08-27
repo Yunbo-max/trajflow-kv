@@ -6,6 +6,9 @@ from trajflow_kv.counterfactual import load_counterfactual_jsonl, write_counterf
 from trajflow_kv.visual_delayed import (
     DistractorCreditTask,
     HiddenMemoryTask,
+    InterferenceUpdateTask,
+    MultiCueBindingTask,
+    NonceVisualBindingTask,
     build_visual_counterfactual_dataset,
 )
 
@@ -68,3 +71,50 @@ def test_visual_rows_roundtrip_existing_counterfactual_schema(tmp_path):
     assert all(json.loads(json.dumps(row["prefix"]))["screenshot_path"] for row in loaded)
     initial = next(row for row in loaded if not row["prefix"]["history"])
     assert initial["history_images"] == []
+
+
+def test_multi_cue_binding_requires_both_history_blocks(tmp_path):
+    task = MultiCueBindingTask()
+    rows = build_visual_counterfactual_dataset([2], output_dir=tmp_path / "images", tasks=[task])
+    choose = next(group for group in _group(rows).values() if group[0]["prefix"]["state"]["phase"] == "choose")
+    state = choose[0]["prefix"]["state"]
+    correct = f"choose_{state['color']}_{state['symbol']}"
+    assert len(choose) == 4
+    assert len(choose[0]["history_images"]) == 3
+    assert choose[0]["memory_advantages"] == [1.0, 1.0, 0.0]
+    best_q = max(row["Q"] for row in choose)
+    assert {row["action"] for row in choose if row["Q"] == best_q} == {correct}
+
+
+def test_interference_update_marks_stale_and_updated_memory(tmp_path):
+    task = InterferenceUpdateTask()
+    rows = build_visual_counterfactual_dataset([3], output_dir=tmp_path / "images", tasks=[task])
+    choose = next(group for group in _group(rows).values() if group[0]["prefix"]["state"]["phase"] == "choose")
+    state = choose[0]["prefix"]["state"]
+    assert state["old"] != state["new"]
+    assert len(choose[0]["history_images"]) == 3
+    assert choose[0]["memory_advantages"] == [-1.0, 1.0, 0.0]
+    best_q = max(row["Q"] for row in choose)
+    assert {row["action"] for row in choose if row["Q"] == best_q} == {f"choose_{state['new']}"}
+
+    live = task.initial_state(3)
+    for action, phase in (("continue", "new_cue"), ("continue", "distractor"), ("acknowledge", "choose")):
+        live, done = task.step(live, action)
+        assert not done and live["phase"] == phase
+    live, done = task.step(live, f"choose_{live['new']}")
+    assert not done and live["phase"] == "submit"
+    live, done = task.step(live, "submit")
+    assert done and live["terminal_return"] == 1.0
+
+
+def test_nonce_visual_binding_uses_neutral_slot_actions(tmp_path):
+    task = NonceVisualBindingTask()
+    rows = build_visual_counterfactual_dataset([4], output_dir=tmp_path / "images", tasks=[task])
+    choose = next(group for group in _group(rows).values() if group[0]["prefix"]["state"]["phase"] == "choose")
+    assert len(choose) == 6
+    assert all(row["action"].startswith("select_slot_") for row in choose)
+    assert len(choose[0]["history_images"]) == 3
+    assert choose[0]["memory_advantages"] == [1.0, 1.0, 0.0]
+    best_q = max(row["Q"] for row in choose)
+    correct = f"select_slot_{choose[0]['prefix']['state']['correct_slot'] + 1}"
+    assert {row["action"] for row in choose if row["Q"] == best_q} == {correct}

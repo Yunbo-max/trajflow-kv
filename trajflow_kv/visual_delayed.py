@@ -29,6 +29,7 @@ _PALETTE = {
     "red": (214, 61, 61),
     "blue": (54, 103, 198),
     "green": (48, 157, 92),
+    "amber": (202, 138, 4),
     "orange": (224, 132, 42),
 }
 
@@ -188,6 +189,233 @@ class DistractorCreditTask(VisualDelayedTask):
         image.save(path, format="PNG")
 
 
+class MultiCueBindingTask(VisualDelayedTask):
+    """Bind two cues exposed on separate pages after an intervening distractor."""
+
+    task_family = "multi_cue_binding"
+    instruction = "Remember the color and symbol shown on separate pages, then select their exact pair."
+    colors = ("red", "blue", "green", "amber")
+    symbols = ("circle", "triangle", "square", "star")
+
+    def initial_state(self, seed: int) -> dict[str, Any]:
+        color = self.colors[int(seed) % len(self.colors)]
+        symbol = self.symbols[(int(seed) * 3 + 1) % len(self.symbols)]
+        wrong_color = self.colors[(self.colors.index(color) + 1) % len(self.colors)]
+        wrong_symbol = self.symbols[(self.symbols.index(symbol) + 1) % len(self.symbols)]
+        options = [f"choose_{color}_{symbol}", f"choose_{wrong_color}_{symbol}",
+                   f"choose_{color}_{wrong_symbol}", f"choose_{wrong_color}_{wrong_symbol}"]
+        shift = int(seed) % len(options); options = options[shift:] + options[:shift]
+        return {"phase": "color_cue", "color": color, "symbol": symbol,
+                "options": options, "choice": None, "history": [], "seed": int(seed)}
+
+    def available_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        if state["phase"] in {"color_cue", "symbol_cue"}: return ("continue",)
+        if state["phase"] == "distractor": return ("acknowledge",)
+        if state["phase"] == "choose": return tuple(state["options"])
+        if state["phase"] == "submit": return ("submit", "cancel")
+        return ()
+
+    def observe(self, state: dict[str, Any]) -> dict[str, Any]:
+        text = {"color_cue": f"Color cue: {state['color']}",
+                "symbol_cue": f"Symbol cue: {state['symbol']}",
+                "distractor": "Neutral verification page; neither cue is shown.",
+                "choose": "Select the exact color-symbol pair from memory.",
+                "submit": f"Selected pair: {state['choice']}"}.get(state["phase"], "Task finished.")
+        return {"screen": text, "candidates": list(self.available_actions(state))}
+
+    def critical_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        return tuple(self.available_actions(state)) if state["phase"] == "choose" else ()
+
+    def optimal_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        if state["phase"] == "choose": return (f"choose_{state['color']}_{state['symbol']}",)
+        if state["phase"] == "submit" and state.get("choice") == f"{state['color']}_{state['symbol']}": return ("submit",)
+        return tuple(self.available_actions(state)) if state["phase"] in {"color_cue", "symbol_cue", "distractor"} else ()
+
+    def memory_advantages(self, state: dict[str, Any], history_count: int) -> tuple[float, ...]:
+        values = [0.0] * history_count
+        if state["phase"] in {"symbol_cue", "distractor", "choose"} and values: values[0] = 1.0
+        if state["phase"] in {"distractor", "choose"} and len(values) > 1: values[1] = 1.0
+        return tuple(values)
+
+    def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
+        state = self.clone(state); state["history"].append(action); phase = state["phase"]
+        if phase == "color_cue" and action == "continue": state["phase"] = "symbol_cue"; return state, False
+        if phase == "symbol_cue" and action == "continue": state["phase"] = "distractor"; return state, False
+        if phase == "distractor" and action == "acknowledge": state["phase"] = "choose"; return state, False
+        if phase == "choose" and action in self.available_actions(state):
+            state["choice"] = action[len("choose_"):]; state["phase"] = "submit"; return state, False
+        if phase == "submit":
+            correct = state.get("choice") == f"{state['color']}_{state['symbol']}"
+            state.update(phase="terminal", terminal_return=float(action == "submit" and correct)); return state, True
+        state.update(phase="terminal", terminal_return=0.0); return state, True
+
+    def render_screenshot(self, state: dict[str, Any], path: str | Path) -> None:
+        image = Image.new("RGB", (960, 600), (247, 249, 252)); draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 960, 68), fill=(35, 48, 68)); draw.text((28, 22), "TANGO multi-cue binding", fill="white", font=_font())
+        phase = state["phase"]
+        if phase == "color_cue":
+            draw.rounded_rectangle((50, 130, 910, 235), radius=12, fill=_PALETTE[state["color"]])
+            draw.text((75, 170), f"MEMORIZE COLOR: {state['color'].upper()}", fill="white", font=_font()); labels = ("Continue",)
+        elif phase == "symbol_cue":
+            draw.text((50, 170), f"MEMORIZE SYMBOL: {state['symbol'].upper()}", fill=(25, 31, 40), font=_font(28)); labels = ("Continue",)
+        elif phase == "distractor":
+            draw.text((50, 170), "Verification complete. The two cues are now hidden.", fill=(25, 31, 40), font=_font()); labels = ("Acknowledge",)
+        elif phase == "choose":
+            draw.text((50, 115), "Choose the remembered COLOR / SYMBOL pair", fill=(25, 31, 40), font=_font())
+            labels = tuple(action[len("choose_"):].replace("_", " / ").upper() for action in state["options"])
+        elif phase == "submit":
+            draw.text((50, 170), f"Selected: {state['choice']}", fill=(25, 31, 40), font=_font()); labels = ("Submit", "Cancel")
+        else: labels = ()
+        for index, label in enumerate(labels):
+            cols = 2 if len(labels) > 2 else len(labels); row, col = divmod(index, max(cols, 1)); left = 55 + col * 445; top = 270 + row * 105
+            _draw_button(draw, (left, top, left + 405, top + 75), label)
+        Path(path).parent.mkdir(parents=True, exist_ok=True); image.save(path, format="PNG")
+
+
+class InterferenceUpdateTask(VisualDelayedTask):
+    """A newer cue supersedes an old cue; stale memory should be suppressed."""
+
+    task_family = "interference_update"
+    instruction = "Remember the UPDATED color. Ignore the earlier obsolete color and later choose the update."
+    colors = ("red", "blue", "green", "amber")
+
+    def initial_state(self, seed: int) -> dict[str, Any]:
+        old = self.colors[int(seed) % len(self.colors)]; new = self.colors[(int(seed) * 3 + 1) % len(self.colors)]
+        if new == old: new = self.colors[(self.colors.index(old) + 1) % len(self.colors)]
+        options = list(self.colors); shift = int(seed) % len(options); options = options[shift:] + options[:shift]
+        return {"phase": "old_cue", "old": old, "new": new, "options": options,
+                "choice": None, "history": [], "seed": int(seed)}
+
+    def available_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        if state["phase"] in {"old_cue", "new_cue"}: return ("continue",)
+        if state["phase"] == "distractor": return ("acknowledge",)
+        if state["phase"] == "choose": return tuple(f"choose_{color}" for color in state["options"])
+        if state["phase"] == "submit": return ("submit", "cancel")
+        return ()
+
+    def observe(self, state: dict[str, Any]) -> dict[str, Any]:
+        text = {"old_cue": f"Initial color: {state['old']}", "new_cue": f"UPDATED color replaces it: {state['new']}",
+                "distractor": "Neutral page. No color is visible.", "choose": "Choose the updated color, not the obsolete color.",
+                "submit": f"Selected: {state['choice']}"}.get(state["phase"], "Task finished.")
+        return {"screen": text, "candidates": list(self.available_actions(state))}
+
+    def critical_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        return tuple(self.available_actions(state)) if state["phase"] == "choose" else ()
+
+    def optimal_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        if state["phase"] == "choose": return (f"choose_{state['new']}",)
+        if state["phase"] == "submit" and state.get("choice") == state.get("new"): return ("submit",)
+        return tuple(self.available_actions(state)) if state["phase"] in {"old_cue", "new_cue", "distractor"} else ()
+
+    def memory_advantages(self, state: dict[str, Any], history_count: int) -> tuple[float, ...]:
+        values = [0.0] * history_count
+        if state["phase"] in {"distractor", "choose"} and len(values) > 1: values[0] = -1.0; values[1] = 1.0
+        return tuple(values)
+
+    def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
+        state = self.clone(state); state["history"].append(action); phase = state["phase"]
+        if phase == "old_cue" and action == "continue": state["phase"] = "new_cue"; return state, False
+        if phase == "new_cue" and action == "continue": state["phase"] = "distractor"; return state, False
+        if phase == "distractor" and action == "acknowledge": state["phase"] = "choose"; return state, False
+        if phase == "choose" and action in self.available_actions(state): state["choice"] = action[len("choose_"):]; state["phase"] = "submit"; return state, False
+        if phase == "submit": state.update(phase="terminal", terminal_return=float(action == "submit" and state.get("choice") == state.get("new"))); return state, True
+        state.update(phase="terminal", terminal_return=0.0); return state, True
+
+    def render_screenshot(self, state: dict[str, Any], path: str | Path) -> None:
+        image = Image.new("RGB", (960, 600), (249, 249, 252)); draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 960, 68), fill=(35, 48, 68)); draw.text((28, 22), "TANGO interference update", fill="white", font=_font())
+        phase = state["phase"]
+        if phase in {"old_cue", "new_cue"}:
+            color = state["old"] if phase == "old_cue" else state["new"]
+            title = "INITIAL (WILL BE REPLACED)" if phase == "old_cue" else "UPDATED — USE THIS"
+            draw.rounded_rectangle((50, 130, 910, 235), radius=12, fill=_PALETTE[color]); draw.text((75, 170), f"{title}: {color.upper()}", fill="white", font=_font()); labels = ("Continue",)
+        elif phase == "distractor": draw.text((50, 170), "Status page. Both color banners are hidden.", fill=(25, 31, 40), font=_font()); labels = ("Acknowledge",)
+        elif phase == "choose": draw.text((50, 120), "Which color was the UPDATE?", fill=(25, 31, 40), font=_font()); labels = tuple(color.title() for color in state["options"])
+        elif phase == "submit": draw.text((50, 170), f"Selected: {state['choice']}", fill=(25, 31, 40), font=_font()); labels = ("Submit", "Cancel")
+        else: labels = ()
+        for index, label in enumerate(labels):
+            cols = 2 if len(labels) > 2 else len(labels); row, col = divmod(index, max(cols, 1)); left = 55 + col * 445; top = 270 + row * 105
+            fill = _PALETTE.get(label.lower(), (238, 242, 248)) if phase == "choose" else (238, 242, 248); _draw_button(draw, (left, top, left + 405, top + 75), label, fill=fill)
+        Path(path).parent.mkdir(parents=True, exist_ok=True); image.save(path, format="PNG")
+
+
+class NonceVisualBindingTask(VisualDelayedTask):
+    """Bind two render-only nonce codes and select a neutral positional action."""
+
+    task_family = "nonce_visual_binding"
+    instruction = "Remember both codes shown on separate pages. At the choice page, select the slot containing their exact ordered pair."
+    left_codes = ("K7Q", "R4M", "B9X", "T2F", "P6N", "D3W", "H8L", "V5C")
+    right_codes = ("Z2A", "G8P", "C5R", "N1Y", "W7D", "F4K", "M9B", "Q3V")
+
+    def initial_state(self, seed: int) -> dict[str, Any]:
+        seed = int(seed)
+        left = self.left_codes[seed % len(self.left_codes)]
+        right = self.right_codes[(seed * 5 + 3) % len(self.right_codes)]
+        pairs = [(left, right)]
+        for offset in range(1, 6):
+            pairs.append((self.left_codes[(seed + offset) % 8], self.right_codes[(seed * 5 + 3 + 3 * offset) % 8]))
+        shift = (seed * 3) % len(pairs)
+        pairs = pairs[shift:] + pairs[:shift]
+        return {"phase": "left", "left": left, "right": right, "pairs": pairs,
+                "correct_slot": pairs.index((left, right)), "choice": None, "history": [], "seed": seed}
+
+    def available_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        if state["phase"] in {"left", "right"}: return ("continue",)
+        if state["phase"] == "distractor": return ("acknowledge",)
+        if state["phase"] == "choose": return tuple(f"select_slot_{i + 1}" for i in range(len(state["pairs"])))
+        if state["phase"] == "submit": return ("submit", "cancel")
+        return ()
+
+    def observe(self, state: dict[str, Any]) -> dict[str, Any]:
+        text = {"left": "First code is visible only in the screenshot.", "right": "Second code is visible only in the screenshot.",
+                "distractor": "The codes are hidden.", "choose": "Select the matching ordered pair by slot.",
+                "submit": f"Selected slot: {state['choice']}"}.get(state["phase"], "Task finished.")
+        return {"screen": text, "candidates": list(self.available_actions(state))}
+
+    def critical_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        return tuple(self.available_actions(state)) if state["phase"] == "choose" else ()
+
+    def optimal_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        if state["phase"] == "choose": return (f"select_slot_{state['correct_slot'] + 1}",)
+        if state["phase"] == "submit" and state.get("choice") == state.get("correct_slot"): return ("submit",)
+        return tuple(self.available_actions(state)) if state["phase"] in {"left", "right", "distractor"} else ()
+
+    def memory_advantages(self, state: dict[str, Any], history_count: int) -> tuple[float, ...]:
+        values = [0.0] * history_count
+        if state["phase"] in {"right", "distractor", "choose"} and values: values[0] = 1.0
+        if state["phase"] in {"distractor", "choose"} and len(values) > 1: values[1] = 1.0
+        return tuple(values)
+
+    def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
+        state = self.clone(state); state["history"].append(action); phase = state["phase"]
+        if phase == "left" and action == "continue": state["phase"] = "right"; return state, False
+        if phase == "right" and action == "continue": state["phase"] = "distractor"; return state, False
+        if phase == "distractor" and action == "acknowledge": state["phase"] = "choose"; return state, False
+        if phase == "choose" and action in self.available_actions(state): state["choice"] = int(action.rsplit("_", 1)[1]) - 1; state["phase"] = "submit"; return state, False
+        if phase == "submit": state.update(phase="terminal", terminal_return=float(action == "submit" and state.get("choice") == state.get("correct_slot"))); return state, True
+        state.update(phase="terminal", terminal_return=0.0); return state, True
+
+    def render_screenshot(self, state: dict[str, Any], path: str | Path) -> None:
+        image = Image.new("RGB", (960, 600), (245, 247, 251)); draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 960, 68), fill=(27, 39, 60)); draw.text((28, 22), "Secure pair verification", fill="white", font=_font())
+        phase = state["phase"]
+        if phase in {"left", "right"}:
+            code = state[phase]; ordinal = "FIRST" if phase == "left" else "SECOND"
+            draw.text((250, 150), f"MEMORIZE {ordinal} CODE", fill=(40, 48, 62), font=_font(24))
+            draw.rounded_rectangle((265, 215, 695, 335), radius=15, fill=(225, 231, 243), outline=(60, 80, 115), width=3)
+            draw.text((410, 255), code, fill=(15, 25, 45), font=_font(34)); labels = ("Continue",)
+        elif phase == "distractor": draw.text((245, 210), "Session synchronization complete", fill=(40, 48, 62), font=_font()); labels = ("Acknowledge",)
+        elif phase == "choose":
+            draw.text((45, 92), "Select the slot containing FIRST CODE / SECOND CODE", fill=(40, 48, 62), font=_font())
+            labels = tuple(f"SLOT {i + 1}:  {a} / {b}" for i, (a, b) in enumerate(state["pairs"]))
+        elif phase == "submit": draw.text((300, 205), f"Selected slot {state['choice'] + 1}", fill=(40, 48, 62), font=_font()); labels = ("Submit", "Cancel")
+        else: labels = ()
+        for index, label in enumerate(labels):
+            cols = 2 if len(labels) > 2 else max(len(labels), 1); row, col = divmod(index, cols); left = 35 + col * 465; top = (155 + row * 115) if phase == "choose" else 430
+            _draw_button(draw, (left, top, left + 425, top + 82), label)
+        Path(path).parent.mkdir(parents=True, exist_ok=True); image.save(path, format="PNG")
+
+
 class HiddenMemoryTask(VisualDelayedTask):
     """A cue, a harmless intervening screen, then a delayed visual choice."""
 
@@ -299,7 +527,12 @@ class HiddenMemoryTask(VisualDelayedTask):
 
 def visual_delayed_tasks() -> tuple[VisualDelayedTask, ...]:
     """Return the controlled visual families used by the pilot."""
-    return (DistractorCreditTask(), HiddenMemoryTask())
+    return (DistractorCreditTask(), HiddenMemoryTask(), MultiCueBindingTask(), InterferenceUpdateTask(), NonceVisualBindingTask())
+
+
+def visual_delayed_task_registry() -> dict[str, VisualDelayedTask]:
+    """Return fresh task instances keyed by stable family name."""
+    return {task.task_family: task for task in visual_delayed_tasks()}
 
 
 def build_visual_counterfactual_dataset(

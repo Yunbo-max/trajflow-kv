@@ -9,6 +9,16 @@ with a trajectory-level return-weighted objective plus transport-energy and
 orthogonality penalties. It includes a deterministic toy policy for CI and a
 Qwen/AITW path for real experiments.
 
+The next controlled experiment is specified in
+[`docs/tango_v3_experiment_protocol.md`](docs/tango_v3_experiment_protocol.md).
+It separates action credit from latent-memory credit and pre-registers fair
+baselines, causal localization, invariance, and OOD gates. The first semantic
+multi-cue/update pilot saturated at `10/10` critical forks; removing its first
+and second history blocks reduced accuracy to `9/10` and `6/10`, while removing
+the distractor stayed `10/10`. It is therefore retained as a causal-memory
+probe, not evidence of method improvement. The comparative benchmark will use
+hard nonce visual binding and interference-chain variants.
+
 ## Current go/no-go result
 
 The latest controlled run is a **single-task online go / cross-task pending**,

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from trajflow_kv.counterfactual import write_counterfactual_jsonl
-from trajflow_kv.visual_delayed import build_visual_counterfactual_dataset
+from trajflow_kv.visual_delayed import build_visual_counterfactual_dataset, visual_delayed_task_registry
 
 
 def main() -> None:
@@ -19,13 +19,24 @@ def main() -> None:
     parser.add_argument("--seed-start", type=int, default=0)
     parser.add_argument("--horizon", type=int, default=8)
     parser.add_argument("--aggregation", choices=("mean", "max"), default="mean")
+    parser.add_argument(
+        "--families",
+        nargs="+",
+        help="Optional task-family subset (default: all registered families).",
+    )
     args = parser.parse_args()
     image_dir = args.image_dir or args.output.parent / "images"
+    registry = visual_delayed_task_registry()
+    unknown = sorted(set(args.families or ()) - set(registry))
+    if unknown:
+        parser.error(f"unknown families: {', '.join(unknown)}; choices: {', '.join(sorted(registry))}")
+    tasks = [registry[name] for name in args.families] if args.families else list(registry.values())
     rows = build_visual_counterfactual_dataset(
         range(args.seed_start, args.seed_start + args.seeds),
         output_dir=image_dir,
         horizon=args.horizon,
         aggregation=args.aggregation,
+        tasks=tasks,
     )
     count = write_counterfactual_jsonl(rows, args.output)
     prefixes = {row["prefix_id"] for row in rows}
@@ -43,4 +54,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
