@@ -136,6 +136,17 @@ ONE; the other is an incorrect visual choice among unlabeled colored boxes.
 This is online cross-environment no-regression evidence, not a
 cross-environment return improvement.
 
+The first TANGO trajectory-control matrix is recorded in
+[`results/tango_trajectory_controls_e5.json`](results/tango_trajectory_controls_e5.json).
+On six held-out AndroidWorld trajectories, the shared warm-start margin is
+`0.13015`, observed-return training reaches `0.14116`, shuffled return reaches
+`0.13219`, and sign-flipped return falls to `0.12312`. Horizons `1/3/5/full`
+score `0.13975/0.14387/0.14304/0.14309`. This is useful label-direction
+evidence, but not yet the desired trajectory-over-token result: the curve
+plateaus after H=3 and first-only is strongest on this tiny split. We therefore
+require a larger same-prefix delayed-consequence split before making that
+claim.
+
 A second MiniWoB gate trains directly on 40 seeded random legal-click
 trajectories (19 successful) and evaluates 20 independent trajectories. The
 held-out success/failure score margin rises from `0.12792` at the shared

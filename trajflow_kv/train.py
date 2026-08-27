@@ -12,6 +12,7 @@ from torch import nn
 from .data import load_jsonl
 from .objective import normalized_advantages, shuffle_within_tasks, trajectory_policy_loss
 from .projector import attach_kv_projectors
+from .training_controls import controlled_returns, remove_prompt_history, select_trajectory_steps
 
 
 class ToyKVPolicy(nn.Module):
@@ -102,6 +103,10 @@ def train_qwen(cfg):
         "first_hook": bundle.names[0],
         "last_hook": bundle.names[-1],
         "projector_checkpoint": projector_checkpoint,
+        "return_mode": cfg.get("return_mode", "observed"),
+        "trajectory_horizon": cfg.get("trajectory_horizon", "full"),
+        "step_selection": cfg.get("step_selection", "all"),
+        "remove_history": cfg.get("remove_history", False),
     }]
     if device.startswith("cuda"):
         torch.cuda.reset_peak_memory_stats()
@@ -114,10 +119,10 @@ def train_qwen(cfg):
         return_mode = cfg.get("return_mode", "observed")
         if return_mode == "shuffle":
             returns = shuffle_within_tasks(returns, task_ids)
-        elif return_mode == "zero":
-            returns = torch.zeros_like(returns)
-        elif return_mode != "observed":
-            raise ValueError(f"unsupported return_mode: {return_mode}")
+        else:
+            returns = controlled_returns(
+                observed_returns, return_mode, seed=cfg["seed"], epoch=epoch
+            )
         advantages = normalized_advantages(returns, task_ids)
         if cfg.get("lambda_action", 0.0) == 0 and torch.count_nonzero(advantages) == 0:
             raise ValueError(
@@ -127,16 +132,23 @@ def train_qwen(cfg):
         optimizer.zero_grad(set_to_none=True)
         for index, trajectory in enumerate(trajectories):
             trajectory_logprob = torch.zeros((), device=device)
-            for step in trajectory["steps"]:
+            selected_steps = select_trajectory_steps(
+                trajectory["steps"], cfg.get("trajectory_horizon", "full"),
+                cfg.get("step_selection", "all"),
+            )
+            for step in selected_steps:
                 content = []
                 loaded_image = None
                 if step.get("image"):
                     loaded_image = Image.open(step["image"]).convert("RGB")
                     content.append({"type": "image", "image": loaded_image})
                 inferred_size = loaded_image.size if loaded_image else tuple(step.get("screen_size", (1000, 1000)))
+                step_history = [] if cfg.get("remove_history", False) else step.get("history", [])
                 prompt = step.get("prompt") or build_action_prompt(
-                    trajectory["instruction"], step.get("history", []), inferred_size
+                    trajectory["instruction"], step_history, inferred_size
                 )
+                if cfg.get("remove_history", False) and step.get("prompt"):
+                    prompt = remove_prompt_history(prompt)
                 content.append({"type": "text", "text": prompt})
                 messages = [{"role": "user", "content": content},
                             {"role": "assistant", "content": [
@@ -192,7 +204,18 @@ def main():
     parser.add_argument("--rank", type=int)
     parser.add_argument("--alpha", type=float)
     parser.add_argument("--last-n-layers", type=int)
-    parser.add_argument("--return-mode", choices=("observed", "shuffle", "zero"))
+    parser.add_argument(
+        "--return-mode", choices=("observed", "shuffle", "zero", "random", "sign_flip")
+    )
+    parser.add_argument(
+        "--trajectory-horizon", default=None,
+        help="Number of leading trajectory steps used by the objective, or 'full' (default).",
+    )
+    parser.add_argument(
+        "--step-selection", choices=("all", "first", "final"), default=None,
+        help="Use all, only the first, or only the final step inside the selected horizon.",
+    )
+    parser.add_argument("--remove-history", action="store_true")
     parser.add_argument("--lambda-action", type=float)
     parser.add_argument("--positive-action-only", action="store_true")
     parser.add_argument("--lambda-energy", type=float)
@@ -213,9 +236,12 @@ def main():
         cfg["projector_checkpoint"] = None
     if args.positive_action_only:
         cfg["positive_action_only"] = True
+    if args.remove_history:
+        cfg["remove_history"] = True
     for key in (
         "return_mode", "lambda_action", "lambda_energy", "lambda_orth",
         "epochs", "max_pixels", "target", "rank", "alpha", "last_n_layers",
+        "trajectory_horizon", "step_selection",
     ):
         value = getattr(args, key)
         if value is not None:
