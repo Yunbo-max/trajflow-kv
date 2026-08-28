@@ -53,3 +53,18 @@ def test_kv_block_ablator_targets_selected_layer_and_projection():
     assert torch.all(ablated[:, 3:] == 1)
     assert torch.all(key == 1)
     ablator.close()
+
+
+def test_kv_block_ablator_can_patch_from_matched_visual_span():
+    model = _Toy()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.copy_(torch.eye(4))
+    ablator = attach_kv_block_ablator(model, target="k", layers=[0])
+    ids = torch.tensor([[151652, 9, 151653, 4, 151652, 8, 151653]])
+    ablator.set_image(ids, 0, replacement_image_index=1)
+    x = torch.arange(28, dtype=torch.float32).reshape(1, 7, 4)
+    patched = model.layers[0].self_attn.k_proj(x)
+    assert torch.equal(patched[:, 0:3], x[:, 4:7])
+    assert torch.equal(patched[:, 4:7], x[:, 4:7])
+    ablator.close()

@@ -45,3 +45,14 @@ def test_gated_bundle_builds_visual_history_mask():
     bundle.clear_context()
     assert module._memory_mask is None
     bundle.close()
+
+
+def test_signed_gate_can_suppress_selected_memory_tokens():
+    module = StateConditionedLowRankResidual(4, rank=2, alpha=2, gate_rank=2, signed_gate=True)
+    with torch.no_grad():
+        module.gate_bias.fill_(-2.0)
+    module.set_context(torch.tensor([[True, False]]), decision_index=1)
+    output = module(torch.ones(1, 2, 4))
+    assert output.shape == (1, 2, 4)
+    assert module.last_gate[0, 0, 0] < 0
+    assert module.last_gate[0, 1, 0] == 0

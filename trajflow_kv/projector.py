@@ -43,11 +43,12 @@ class LowRankResidual(nn.Module):
 class StateConditionedLowRankResidual(LowRankResidual):
     """Low-rank transport gated per memory token by the decision state."""
 
-    def __init__(self, width: int, rank: int, alpha: float, gate_rank: int = 16):
+    def __init__(self, width: int, rank: int, alpha: float, gate_rank: int = 16, signed_gate: bool = False):
         super().__init__(width, rank, alpha)
         self.query_gate = nn.Linear(width, gate_rank, bias=False)
         self.memory_gate = nn.Linear(width, gate_rank, bias=False)
-        self.gate_bias = nn.Parameter(torch.tensor(-2.0))
+        self.signed_gate = bool(signed_gate)
+        self.gate_bias = nn.Parameter(torch.tensor(0.0 if signed_gate else -2.0))
         self._memory_mask: torch.Tensor | None = None
         self._decision_index: int | None = None
         self.last_gate: torch.Tensor | None = None
@@ -73,7 +74,7 @@ class StateConditionedLowRankResidual(LowRankResidual):
         query = self.query_gate(x[..., self._decision_index : self._decision_index + 1, :])
         memory = self.memory_gate(x)
         logits = (query * memory).sum(dim=-1, keepdim=True) / (query.shape[-1] ** 0.5)
-        gate = torch.sigmoid(logits + self.gate_bias)
+        gate = torch.tanh(logits + self.gate_bias) if self.signed_gate else torch.sigmoid(logits + self.gate_bias)
         gate = gate * mask[..., None].to(gate.dtype)
         delta = self.up(self.down(x)) * self.scale * gate
         self.last_gate = gate
@@ -166,6 +167,7 @@ def attach_gated_kv_projectors(
     target: str = "both",
     layers: Iterable[int] | None = None,
     gate_rank: int = 16,
+    signed_gate: bool = False,
 ) -> HookedProjectors:
     """Attach state-conditioned transport only to selected decoder layers."""
     if target not in {"k", "v", "both"}:
@@ -188,7 +190,7 @@ def attach_gated_kv_projectors(
     handles, names = [], []
     for name, linear in selected:
         projector = StateConditionedLowRankResidual(
-            linear.out_features, rank, alpha, gate_rank=gate_rank
+            linear.out_features, rank, alpha, gate_rank=gate_rank, signed_gate=signed_gate
         ).to(device=linear.weight.device, dtype=linear.weight.dtype)
         projectors.append(projector)
         handles.append(linear.register_forward_hook(

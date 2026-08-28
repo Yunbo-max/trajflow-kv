@@ -73,6 +73,10 @@ class VisualDelayedTask(DelayedConsequenceTask):
         """Ground-truth memory-block advantage for controlled diagnostics."""
         return (0.0,) * history_count
 
+    def memory_roles(self, state: dict[str, Any], history_count: int) -> tuple[str, ...]:
+        """Semantic roles; these are not asserted to equal model-causal signs."""
+        return ("irrelevant",) * history_count
+
     def render_screenshot(self, state: dict[str, Any], path: str | Path) -> None:
         raise NotImplementedError
 
@@ -312,6 +316,12 @@ class InterferenceUpdateTask(VisualDelayedTask):
         if state["phase"] in {"distractor", "choose"} and len(values) > 1: values[0] = -1.0; values[1] = 1.0
         return tuple(values)
 
+    def memory_roles(self, state: dict[str, Any], history_count: int) -> tuple[str, ...]:
+        roles = ["irrelevant"] * history_count
+        if state["phase"] in {"distractor", "choose"} and len(roles) > 1:
+            roles[0], roles[1] = "stale", "useful"
+        return tuple(roles)
+
     def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
         state = self.clone(state); state["history"].append(action); phase = state["phase"]
         if phase == "old_cue" and action == "continue": state["phase"] = "new_cue"; return state, False
@@ -386,6 +396,12 @@ class NonceVisualBindingTask(VisualDelayedTask):
         if state["phase"] in {"distractor", "choose"} and len(values) > 1: values[1] = 1.0
         return tuple(values)
 
+    def memory_roles(self, state: dict[str, Any], history_count: int) -> tuple[str, ...]:
+        roles = ["irrelevant"] * history_count
+        if state["phase"] in {"right", "distractor", "choose"} and roles: roles[0] = "useful"
+        if state["phase"] in {"distractor", "choose"} and len(roles) > 1: roles[1] = "useful"
+        return tuple(roles)
+
     def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
         state = self.clone(state); state["history"].append(action); phase = state["phase"]
         if phase == "left" and action == "continue": state["phase"] = "right"; return state, False
@@ -413,6 +429,86 @@ class NonceVisualBindingTask(VisualDelayedTask):
         for index, label in enumerate(labels):
             cols = 2 if len(labels) > 2 else max(len(labels), 1); row, col = divmod(index, cols); left = 35 + col * 465; top = (155 + row * 115) if phase == "choose" else 430
             _draw_button(draw, (left, top, left + 425, top + 82), label)
+        Path(path).parent.mkdir(parents=True, exist_ok=True); image.save(path, format="PNG")
+
+
+class InterferenceChainTask(VisualDelayedTask):
+    """Multiple nonce updates interleaved with visually matched reference records."""
+
+    task_family = "interference_chain"
+    instruction = "Track the most recent UPDATE record. Ignore INITIAL and REFERENCE records, then select the slot containing the latest update code."
+    codes = NonceVisualBindingTask.left_codes
+
+    def initial_state(self, seed: int) -> dict[str, Any]:
+        seed = int(seed)
+        ordered = [self.codes[(seed + offset * 3) % len(self.codes)] for offset in range(5)]
+        entries = [
+            {"role": "INITIAL", "code": ordered[0]}, {"role": "REFERENCE", "code": ordered[1]},
+            {"role": "UPDATE", "code": ordered[2]}, {"role": "REFERENCE", "code": ordered[3]},
+            {"role": "UPDATE", "code": ordered[4]},
+        ]
+        options = list(self.codes); shift = (seed * 5) % len(options); options = options[shift:] + options[:shift]
+        return {"phase": "record", "record_index": 0, "entries": entries, "options": options,
+                "target": ordered[4], "choice": None, "history": [], "seed": seed}
+
+    def available_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        if state["phase"] == "record": return ("continue",)
+        if state["phase"] == "choose": return tuple(f"select_slot_{i + 1}" for i in range(len(state["options"])))
+        if state["phase"] == "submit": return ("submit", "cancel")
+        return ()
+
+    def observe(self, state: dict[str, Any]) -> dict[str, Any]:
+        if state["phase"] == "record": text = "A record is visible in the screenshot. Track its role and code."
+        elif state["phase"] == "choose": text = "Select the latest UPDATE code by slot."
+        elif state["phase"] == "submit": text = f"Selected slot: {state['choice']}"
+        else: text = "Task finished."
+        return {"screen": text, "candidates": list(self.available_actions(state))}
+
+    def critical_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        return tuple(self.available_actions(state)) if state["phase"] == "choose" else ()
+
+    def optimal_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
+        if state["phase"] == "choose": return (f"select_slot_{state['options'].index(state['target']) + 1}",)
+        if state["phase"] == "submit" and state.get("choice") == state["options"].index(state["target"]): return ("submit",)
+        return ("continue",) if state["phase"] == "record" else ()
+
+    def memory_advantages(self, state: dict[str, Any], history_count: int) -> tuple[float, ...]:
+        # Designer prior only; empirical causal signs come from matched KV patches.
+        roles = self.memory_roles(state, history_count)
+        return tuple(1.0 if role == "useful" else -1.0 if role == "stale" else 0.0 for role in roles)
+
+    def memory_roles(self, state: dict[str, Any], history_count: int) -> tuple[str, ...]:
+        if state["phase"] != "choose": return ("irrelevant",) * history_count
+        canonical = ("stale", "irrelevant", "stale", "irrelevant", "useful")
+        return canonical[:history_count]
+
+    def step(self, state: dict[str, Any], action: str) -> tuple[dict[str, Any], bool]:
+        state = self.clone(state); state["history"].append(action); phase = state["phase"]
+        if phase == "record" and action == "continue":
+            if state["record_index"] + 1 < len(state["entries"]): state["record_index"] += 1
+            else: state["phase"] = "choose"
+            return state, False
+        if phase == "choose" and action in self.available_actions(state): state["choice"] = int(action.rsplit("_", 1)[1]) - 1; state["phase"] = "submit"; return state, False
+        if phase == "submit": state.update(phase="terminal", terminal_return=float(action == "submit" and state.get("choice") == state["options"].index(state["target"]))); return state, True
+        state.update(phase="terminal", terminal_return=0.0); return state, True
+
+    def render_screenshot(self, state: dict[str, Any], path: str | Path) -> None:
+        image = Image.new("RGB", (960, 600), (245, 247, 251)); draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 960, 68), fill=(27, 39, 60)); draw.text((28, 22), "Record audit", fill="white", font=_font())
+        phase = state["phase"]
+        if phase == "record":
+            entry = state["entries"][state["record_index"]]
+            draw.rounded_rectangle((210, 135, 750, 340), radius=14, fill=(230, 234, 242), outline=(70, 82, 105), width=3)
+            draw.text((250, 180), f"RECORD TYPE: {entry['role']}", fill=(40, 48, 62), font=_font(25))
+            draw.text((400, 255), entry["code"], fill=(15, 25, 45), font=_font(36)); labels = ("Continue",)
+        elif phase == "choose":
+            draw.text((50, 90), "Choose the code from the most recent UPDATE record", fill=(40, 48, 62), font=_font())
+            labels = tuple(f"SLOT {i + 1}: {code}" for i, code in enumerate(state["options"]))
+        elif phase == "submit": draw.text((320, 210), f"Selected slot {state['choice'] + 1}", fill=(40, 48, 62), font=_font()); labels = ("Submit", "Cancel")
+        else: labels = ()
+        for index, label in enumerate(labels):
+            cols = 2 if len(labels) > 2 else max(len(labels), 1); row, col = divmod(index, cols); left = 35 + col * 465; top = (125 + row * 100) if phase == "choose" else 445
+            _draw_button(draw, (left, top, left + 425, top + 72), label)
         Path(path).parent.mkdir(parents=True, exist_ok=True); image.save(path, format="PNG")
 
 
@@ -527,7 +623,7 @@ class HiddenMemoryTask(VisualDelayedTask):
 
 def visual_delayed_tasks() -> tuple[VisualDelayedTask, ...]:
     """Return the controlled visual families used by the pilot."""
-    return (DistractorCreditTask(), HiddenMemoryTask(), MultiCueBindingTask(), InterferenceUpdateTask(), NonceVisualBindingTask())
+    return (DistractorCreditTask(), HiddenMemoryTask(), MultiCueBindingTask(), InterferenceUpdateTask(), NonceVisualBindingTask(), InterferenceChainTask())
 
 
 def visual_delayed_task_registry() -> dict[str, VisualDelayedTask]:
@@ -594,6 +690,7 @@ def build_visual_counterfactual_dataset(
                 memory_advantages = list(
                     task.memory_advantages(row["prefix"]["state"], len(history_images))
                 )
+                memory_roles = list(task.memory_roles(row["prefix"]["state"], len(history_images)))
                 row.update(
                     benchmark=task.benchmark,
                     visual=True,
@@ -601,6 +698,8 @@ def build_visual_counterfactual_dataset(
                     screenshot_path=str(image_path),
                     history_images=list(history_images),
                     memory_advantages=memory_advantages,
+                    memory_advantage_source="designer_role_prior",
+                    memory_roles=memory_roles,
                     critical_step=bool(critical_actions),
                     critical_actions=critical_actions,
                     optimal_actions=optimal_actions,
@@ -614,6 +713,7 @@ def build_visual_counterfactual_dataset(
                 row["prefix"]["screenshot_path"] = str(image_path)
                 row["prefix"]["history_images"] = list(history_images)
                 row["prefix"]["memory_advantages"] = memory_advantages
+                row["prefix"]["memory_roles"] = memory_roles
                 row["prefix"]["critical_step"] = bool(critical_actions)
                 row["prefix"]["critical_actions"] = critical_actions
                 row["prefix"]["optimal_actions"] = optimal_actions

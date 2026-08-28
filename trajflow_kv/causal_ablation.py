@@ -52,17 +52,25 @@ class KVBlockAblator:
     names: list[str]
     enabled: bool = False
     span: tuple[int, int] | None = None
+    replacement_span: tuple[int, int] | None = None
 
-    def set_image(self, input_ids: torch.Tensor, image_index: int) -> None:
+    def set_image(self, input_ids: torch.Tensor, image_index: int, replacement_image_index: int | None = None) -> None:
         spans = vision_token_spans(input_ids)
         if not -len(spans) <= image_index < len(spans):
             raise IndexError(f"image index {image_index} outside {len(spans)} visual blocks")
         self.span = spans[image_index]
+        self.replacement_span = None if replacement_image_index is None else spans[replacement_image_index]
+        if self.replacement_span is not None:
+            target_length = self.span[1] - self.span[0]
+            source_length = self.replacement_span[1] - self.replacement_span[0]
+            if target_length != source_length:
+                raise ValueError(f"KV patch spans must have equal length, got {target_length} and {source_length}")
         self.enabled = True
 
     def clear(self) -> None:
         self.enabled = False
         self.span = None
+        self.replacement_span = None
 
     def close(self) -> None:
         for handle in self.handles:
@@ -102,9 +110,12 @@ def attach_kv_block_ablator(
                 f"ablation span {(start, end)} incompatible with K/V output {tuple(output.shape)}"
             )
         ablated = output.clone()
-        ablated[..., start:end, :] = 0
+        if ablator.replacement_span is None:
+            ablated[..., start:end, :] = 0
+        else:
+            source_start, source_end = ablator.replacement_span
+            ablated[..., start:end, :] = output[..., source_start:source_end, :]
         return ablated
 
     ablator.handles = [module.register_forward_hook(hook) for _, module in selected]
     return ablator
-

@@ -19,6 +19,12 @@ the distractor stayed `10/10`. It is therefore retained as a causal-memory
 probe, not evidence of method improvement. The comparative benchmark will use
 hard nonce visual binding and interference-chain variants.
 
+The first `interference_chain` pilot now passes the difficulty gate at `6/10`.
+More importantly, matched in-sequence middle-layer K patching localizes signed
+credit: latest update `+0.237` (accuracy `6/10 -> 0/10`), superseded update
+`-0.096` (`6/10 -> 10/10`), and matched references `-0.019/+0.001` (both stay
+`6/10`). This is a latent-memory diagnostic GO, not yet a trained-policy claim.
+
 ## Current go/no-go result
 
 The latest controlled run is a **single-task online go / cross-task pending**,

@@ -7,6 +7,7 @@ from trajflow_kv.visual_delayed import (
     DistractorCreditTask,
     HiddenMemoryTask,
     InterferenceUpdateTask,
+    InterferenceChainTask,
     MultiCueBindingTask,
     NonceVisualBindingTask,
     build_visual_counterfactual_dataset,
@@ -118,3 +119,15 @@ def test_nonce_visual_binding_uses_neutral_slot_actions(tmp_path):
     best_q = max(row["Q"] for row in choose)
     correct = f"select_slot_{choose[0]['prefix']['state']['correct_slot'] + 1}"
     assert {row["action"] for row in choose if row["Q"] == best_q} == {correct}
+
+
+def test_interference_chain_exposes_roles_separately_from_causal_signs(tmp_path):
+    task = InterferenceChainTask()
+    rows = build_visual_counterfactual_dataset([7], output_dir=tmp_path / "images", tasks=[task])
+    choose = next(group for group in _group(rows).values() if group[0]["prefix"]["state"]["phase"] == "choose")
+    assert len(choose) == 8
+    assert len(choose[0]["history_images"]) == 5
+    assert choose[0]["memory_roles"] == ["stale", "irrelevant", "stale", "irrelevant", "useful"]
+    assert choose[0]["memory_advantage_source"] == "designer_role_prior"
+    state = choose[0]["prefix"]["state"]
+    assert state["entries"][-1]["code"] == state["target"]

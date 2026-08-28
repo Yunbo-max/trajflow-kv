@@ -303,6 +303,7 @@ def train_qwen_counterfactual(cfg):
             cfg["target"],
             layers=cfg.get("gated_layers"),
             gate_rank=int(cfg.get("gate_rank", 16)),
+            signed_gate=bool(cfg.get("signed_gate", False)),
         )
     else:
         bundle = attach_kv_projectors(

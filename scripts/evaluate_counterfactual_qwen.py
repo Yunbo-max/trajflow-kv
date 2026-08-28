@@ -220,6 +220,7 @@ def _score_groups(
     drop_history_index: int | None = None,
     kv_ablator: Any | None = None,
     ablate_image_index: int = 0,
+    ablate_source_image_index: int | None = None,
     memory_bundle: Any | None = None,
 ) -> list[list[dict[str, Any]]]:
     scored: list[list[dict[str, Any]]] = []
@@ -264,7 +265,7 @@ def _score_groups(
                 labels = batch["input_ids"].clone()
                 labels[:, :prompt_batch["input_ids"].shape[1]] = -100
                 if kv_ablator is not None:
-                    kv_ablator.set_image(batch["input_ids"], ablate_image_index)
+                    kv_ablator.set_image(batch["input_ids"], ablate_image_index, ablate_source_image_index)
                 if memory_bundle is not None:
                     memory_bundle.set_visual_memory_context(
                         batch["input_ids"], len(history_paths),
@@ -314,6 +315,7 @@ def main() -> None:
     parser.add_argument("--state-conditioned-gate", action="store_true")
     parser.add_argument("--gated-layers", nargs="+", type=int)
     parser.add_argument("--gate-rank", type=int, default=16)
+    parser.add_argument("--signed-gate", action="store_true")
     parser.add_argument("--max-pixels", type=int, default=100352)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-prefixes", type=int)
@@ -332,7 +334,7 @@ def main() -> None:
     if args.state_conditioned_gate:
         bundle = attach_gated_kv_projectors(
             model, args.rank, args.alpha, args.target,
-            layers=args.gated_layers, gate_rank=args.gate_rank,
+            layers=args.gated_layers, gate_rank=args.gate_rank, signed_gate=args.signed_gate,
         )
     else:
         bundle = attach_kv_projectors(

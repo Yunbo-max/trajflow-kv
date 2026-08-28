@@ -17,6 +17,13 @@ Memory credit:  A_memory(t,j)   = Q(h_t,M_t) - Q(h_t,M_t^{-j})
 Action credit trains execution. Memory credit trains only a state-conditioned
 K/V gate and transport. Episode return broadcast is retained as a baseline.
 
+Three interventions are reported separately: (i) removing a screenshot and
+re-encoding tests dependence on historical visual evidence; (ii) zeroing a
+decoder K/V span tests a latent path but may be distribution-shifting; (iii)
+the primary KV diagnostic patches the target span with a matched distractor
+span from the same encoded sequence, preserving token count and activation
+scale. Only (ii)/(iii) are called KV-block interventions.
+
 ## Claims and falsification criteria
 
 1. **Causal memory sensitivity.** Removing a cue block must hurt future return
@@ -57,6 +64,12 @@ benchmark. If base critical accuracy is outside 35–85%, use the hard variants:
 
 Every generated instance records the ground-truth critical block label in a
 side channel never included in the policy prompt.
+
+`useful/stale/irrelevant` is a designer-provided semantic role, not an assumed
+model-causal sign. The empirical sign is always defined by the measured policy
+or rollout difference. A stale block may still help a frozen model interpret
+an update relation; such a result falsifies the proposed negative label rather
+than being overwritten by it.
 
 ## Splits
 
@@ -105,6 +118,10 @@ claim; immutable offline continuations are reported as a separate ablation.
 If history oracle fails, stop KV training and repair the prompt/visual task. If
 cue ablation is indistinguishable from distractor ablation, stop and repair the
 memory path. Do not choose `V-only, last-8` by convention.
+
+The K/V scan reports correct-action score effect
+`log p(a*|M)-log p(a*|patch_j(M))`, margin effect, critical accuracy, and sign
+agreement. Matched patching is primary; zero ablation is a stress control.
 
 ## Metrics and statistical protocol
 
@@ -163,3 +180,19 @@ This variant is also rejected for comparative training. The next difficulty
 preflight must combine 2–4 cue updates, matched visual distractors, and unseen
 compositions/templates; no M0–M10 sweep is authorized until the 35–85% gate is
 met.
+
+The ten-seed `interference_chain` pilot then introduced five historical
+records (initial, matched reference, update, matched reference, latest update)
+and eight neutral slots. Base Qwen scored 6/10 critical forks, passing the
+35–85% difficulty gate. It is the first accepted training-comparison family;
+the next required gate is matched KV-patch localization on its five blocks.
+
+That gate passed on the 10-seed pilot at middle-layer K. Replacing the latest
+update with a matched reference reduced critical accuracy from 60% to 0% and
+gave mean correct-action score effect `+0.237`. Replacing the superseded update
+raised accuracy from 60% to 100% with effect `-0.096`. Two references left
+accuracy at 60% with effects `-0.019` and `+0.001`. Across the two updates and
+two references, absolute-effect localization AUROC is 1.0, update sign accuracy
+is 1.0, and both references fall within the predeclared neutral band `|effect|
+<= 0.025`. The initial record has weak positive effect `+0.047`, demonstrating
+why semantic role labels must not overwrite empirical causal signs.
