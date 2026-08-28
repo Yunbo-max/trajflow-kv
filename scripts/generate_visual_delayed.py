@@ -24,6 +24,7 @@ def main() -> None:
         nargs="+",
         help="Optional task-family subset (default: all registered families).",
     )
+    parser.add_argument("--template", choices=("A", "B", "C", "D"), help="Override render template for tasks that support it.")
     args = parser.parse_args()
     image_dir = args.image_dir or args.output.parent / "images"
     registry = visual_delayed_task_registry()
@@ -31,6 +32,10 @@ def main() -> None:
     if unknown:
         parser.error(f"unknown families: {', '.join(unknown)}; choices: {', '.join(sorted(registry))}")
     tasks = [registry[name] for name in args.families] if args.families else list(registry.values())
+    if args.template:
+        for task in tasks:
+            if hasattr(task, "template"):
+                task.template = args.template
     rows = build_visual_counterfactual_dataset(
         range(args.seed_start, args.seed_start + args.seeds),
         output_dir=image_dir,

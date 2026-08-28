@@ -17,6 +17,8 @@ policy success.
 from __future__ import annotations
 
 import copy
+import json
+import random
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -439,17 +441,27 @@ class InterferenceChainTask(VisualDelayedTask):
     instruction = "Track the most recent UPDATE record. Ignore INITIAL and REFERENCE records, then select the slot containing the latest update code."
     codes = NonceVisualBindingTask.left_codes
 
+    def __init__(self, template: str = "A"):
+        if template not in {"A", "B", "C", "D"}: raise ValueError("template must be A, B, C, or D")
+        self.template = template
+
     def initial_state(self, seed: int) -> dict[str, Any]:
         seed = int(seed)
-        ordered = [self.codes[(seed + offset * 3) % len(self.codes)] for offset in range(5)]
+        rng = random.Random(seed * 104729 + 17)
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        options = []
+        while len(options) < 8:
+            code = "".join(rng.choice(alphabet) for _ in range(3))
+            if code not in options: options.append(code)
+        ordered = [options[index] for index in (0, 5, 2, 7, 4)]
         entries = [
             {"role": "INITIAL", "code": ordered[0]}, {"role": "REFERENCE", "code": ordered[1]},
             {"role": "UPDATE", "code": ordered[2]}, {"role": "REFERENCE", "code": ordered[3]},
             {"role": "UPDATE", "code": ordered[4]},
         ]
-        options = list(self.codes); shift = (seed * 5) % len(options); options = options[shift:] + options[:shift]
+        rng.shuffle(options)
         return {"phase": "record", "record_index": 0, "entries": entries, "options": options,
-                "target": ordered[4], "choice": None, "history": [], "seed": seed}
+                "target": ordered[4], "choice": None, "history": [], "seed": seed, "template": self.template}
 
     def available_actions(self, state: dict[str, Any]) -> tuple[str, ...]:
         if state["phase"] == "record": return ("continue",)
@@ -493,14 +505,18 @@ class InterferenceChainTask(VisualDelayedTask):
         state.update(phase="terminal", terminal_return=0.0); return state, True
 
     def render_screenshot(self, state: dict[str, Any], path: str | Path) -> None:
-        image = Image.new("RGB", (960, 600), (245, 247, 251)); draw = ImageDraw.Draw(image)
-        draw.rectangle((0, 0, 960, 68), fill=(27, 39, 60)); draw.text((28, 22), "Record audit", fill="white", font=_font())
+        template = state.get("template", "A")
+        backgrounds = {"A": (245, 247, 251), "B": (250, 246, 240), "C": (238, 246, 244), "D": (246, 241, 248)}
+        headers = {"A": (27, 39, 60), "B": (70, 47, 34), "C": (24, 65, 60), "D": (64, 38, 70)}
+        image = Image.new("RGB", (960, 600), backgrounds[template]); draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 960, 68), fill=headers[template]); draw.text((28, 22), "Record audit", fill="white", font=_font())
         phase = state["phase"]
         if phase == "record":
             entry = state["entries"][state["record_index"]]
-            draw.rounded_rectangle((210, 135, 750, 340), radius=14, fill=(230, 234, 242), outline=(70, 82, 105), width=3)
-            draw.text((250, 180), f"RECORD TYPE: {entry['role']}", fill=(40, 48, 62), font=_font(25))
-            draw.text((400, 255), entry["code"], fill=(15, 25, 45), font=_font(36)); labels = ("Continue",)
+            card = (210, 135, 750, 340) if template in {"A", "B"} else (120, 125, 660, 330)
+            draw.rounded_rectangle(card, radius=14, fill=(230, 234, 242), outline=(70, 82, 105), width=3)
+            draw.text((card[0] + 40, card[1] + 45), f"RECORD TYPE: {entry['role']}", fill=(40, 48, 62), font=_font(25 if template in {"A", "C"} else 22))
+            draw.text((card[0] + 190, card[1] + 120), entry["code"], fill=(15, 25, 45), font=_font(36 if template in {"A", "D"} else 31)); labels = ("Continue",)
         elif phase == "choose":
             draw.text((50, 90), "Choose the code from the most recent UPDATE record", fill=(40, 48, 62), font=_font())
             labels = tuple(f"SLOT {i + 1}: {code}" for i, code in enumerate(state["options"]))
@@ -647,12 +663,15 @@ def build_visual_counterfactual_dataset(
     # once per prefix and pass it explicitly to the VLM; otherwise a delayed
     # cue benchmark silently degenerates into a current-screenshot benchmark.
     rendered_histories: dict[str, list[str]] = {}
+    rendered_states: dict[tuple[str, int, str], str] = {}
     for task in selected_tasks:
         for seed in tuple(int(item) for item in seeds):
             examples = build_counterfactual_examples(task, seed, horizon=horizon, aggregation=aggregation)
             for row in examples:
                 image_path = destination / f"{task.task_family}_s{seed}_{row['prefix_id'].rsplit('-', 1)[-1]}.png"
                 task.render_screenshot(row["prefix"]["state"], image_path)
+                current_key = (task.task_family, seed, json.dumps(row["prefix"]["state"], sort_keys=True))
+                rendered_states[current_key] = str(image_path)
                 prefix_id = str(row["prefix_id"])
                 history_images = rendered_histories.get(prefix_id)
                 if history_images is None:
@@ -663,22 +682,27 @@ def build_visual_counterfactual_dataset(
                     # including the initial cue screenshot.  The current
                     # screenshot remains in ``image`` and is not duplicated.
                     if prefix_history:
-                        history_path = destination / (
-                            f"{task.task_family}_s{seed}_{prefix_id.rsplit('-', 1)[-1]}_history0.png"
-                        )
-                        task.render_screenshot(replay_state, history_path)
-                        history_images.append(str(history_path))
+                        state_key = (task.task_family, seed, json.dumps(replay_state, sort_keys=True))
+                        cached = rendered_states.get(state_key)
+                        if cached is None:
+                            history_path = destination / f"{task.task_family}_s{seed}_state{len(rendered_states)}.png"
+                            task.render_screenshot(replay_state, history_path)
+                            cached = str(history_path)
+                            rendered_states[state_key] = cached
+                        history_images.append(cached)
                     for history_index, history_action in enumerate(prefix_history, start=1):
                         replay_state, _ = task.step(replay_state, str(history_action))
                         # The final replay state is the current screenshot and
                         # is deliberately kept out of history_images.
                         if history_index < len(prefix_history):
-                            history_path = destination / (
-                                f"{task.task_family}_s{seed}_{prefix_id.rsplit('-', 1)[-1]}"
-                                f"_history{history_index}.png"
-                            )
-                            task.render_screenshot(replay_state, history_path)
-                            history_images.append(str(history_path))
+                            state_key = (task.task_family, seed, json.dumps(replay_state, sort_keys=True))
+                            cached = rendered_states.get(state_key)
+                            if cached is None:
+                                history_path = destination / f"{task.task_family}_s{seed}_state{len(rendered_states)}.png"
+                                task.render_screenshot(replay_state, history_path)
+                                cached = str(history_path)
+                                rendered_states[state_key] = cached
+                            history_images.append(cached)
                     # The final replay state should agree with the immutable
                     # prefix state; fail loudly if a collector changes them.
                     if replay_state != row["prefix"]["state"]:

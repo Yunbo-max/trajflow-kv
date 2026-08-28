@@ -21,6 +21,7 @@ common:
   epochs: 5
   energy_lambda: 3000.0
   gate_variants: [sigmoid, signed_tanh]
+  signed_credit_loss: {type: huber, beta: 0.1, scale: validation_only}
   same_candidate_budget: true
 methods:
   - {id: base, objective: none}

@@ -19,6 +19,31 @@ from .training_controls import controlled_returns, remove_prompt_history, select
 from .tango_advantage import counterfactual_objective_loss
 
 
+def memory_gate_supervision_loss(
+    gates: torch.Tensor,
+    advantages: torch.Tensor,
+    *,
+    scale: float,
+    loss_type: str = "bce",
+    signed_gate: bool = False,
+    huber_beta: float = 0.1,
+) -> torch.Tensor:
+    """Distill causal memory credit into unsigned or signed gates."""
+    if scale <= 0:
+        raise ValueError("memory advantage scale must be positive")
+    if gates.shape != advantages.shape:
+        raise ValueError("memory advantage count does not match history gate count")
+    if loss_type == "bce":
+        targets = (advantages.clamp_min(0) / scale).clamp_max(1)
+        return F.binary_cross_entropy(gates.float().clamp(1e-6, 1 - 1e-6), targets.float())
+    if loss_type == "huber":
+        if not signed_gate:
+            raise ValueError("Huber signed credit supervision requires signed_gate=true")
+        targets = (advantages / scale).clamp(-1, 1)
+        return F.smooth_l1_loss(gates.float(), targets.float(), beta=huber_beta)
+    raise ValueError("memory_loss must be bce or huber")
+
+
 class ToyKVPolicy(nn.Module):
     def __init__(self, width: int = 16, actions: int = 5):
         super().__init__()
@@ -438,14 +463,12 @@ def train_qwen_counterfactual(cfg):
                 if target_tensor.shape != scored[0][1].shape:
                     raise ValueError("memory advantage count does not match history gate count")
                 scale = float(cfg.get("memory_advantage_scale", 1.0))
-                if scale <= 0:
-                    raise ValueError("memory_advantage_scale must be positive")
-                # A gate represents useful memory, not signed harmfulness.
-                # Negative counterfactual advantage therefore closes the gate;
-                # positive magnitude is normalized to [0, 1].
-                target_tensor = (target_tensor.clamp_min(0) / scale).clamp_max(1)
-                memory_loss = F.binary_cross_entropy(
-                    scored[0][1].float().clamp(1e-6, 1 - 1e-6), target_tensor
+                memory_loss_type = str(cfg.get("memory_loss", "bce"))
+                memory_loss = memory_gate_supervision_loss(
+                    scored[0][1], target_tensor, scale=scale,
+                    loss_type=memory_loss_type,
+                    signed_gate=bool(cfg.get("signed_gate", False)),
+                    huber_beta=float(cfg.get("memory_huber_beta", 0.1)),
                 )
                 loss = loss + float(cfg.get("lambda_memory", 0.0)) * memory_loss
             energy = bundle.energy()

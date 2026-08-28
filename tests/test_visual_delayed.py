@@ -131,3 +131,14 @@ def test_interference_chain_exposes_roles_separately_from_causal_signs(tmp_path)
     assert choose[0]["memory_advantage_source"] == "designer_role_prior"
     state = choose[0]["prefix"]["state"]
     assert state["entries"][-1]["code"] == state["target"]
+
+
+def test_interference_chain_seeds_and_ood_templates_are_distinct(tmp_path):
+    a = InterferenceChainTask(template="A").initial_state(100)
+    b = InterferenceChainTask(template="B").initial_state(101)
+    assert set(a["options"]) != set(b["options"])
+    assert a["template"] == "A" and b["template"] == "B"
+    task = InterferenceChainTask(template="D")
+    path = tmp_path / "ood.png"
+    task.render_screenshot(task.initial_state(500), path)
+    assert Image.open(path).size == (960, 600)
